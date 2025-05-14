@@ -1,0 +1,11 @@
+numpy
+opencv-python
+kornia
+torch
+tqdm
+lxml
+click
+pyinstaller
+logging
+Pillow
+matplotlib 

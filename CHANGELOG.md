@@ -26,3 +26,14 @@
 - Option CLI : `homolcraft line <pattern> --delta N [--circ]`.
 - Documentation et exemples d'utilisation mis à jour (README).
 - Export et logs détaillés identiques au mode all, compatible Micmac. 
+
+## [1.2.1] - 2025-05-15
+### Correctif
+- Correction critique : en mode "line", seuls les fichiers Homol correspondant aux vrais voisins (selon delta et circ) sont écrits dans chaque dossier PastisXXX. Plus de propagation de fichiers non voisins (ex : IMG_0065.JPG.txt partout).
+- Compatibilité stricte Micmac assurée pour la structure Homol. 
+
+## [1.3.0] - 2025-05-15
+### Refactorisation
+- Factorisation de la génération des paires : fonctions utilitaires `all_pairs` (toutes paires) et `line_pairs` (voisins, delta, circ).
+- Correction du mode `all` : il ne dépend plus de `delta`/`circ` et traite bien toutes les paires possibles.
+- Préparation à la mutualisation du pipeline principal pour les futurs modes (ex : mulscale). 

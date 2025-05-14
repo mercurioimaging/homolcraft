@@ -3,7 +3,7 @@ import numpy as np
 import time
 from itertools import combinations
 
-ALGO_VERSION = "1.2.0"
+ALGO_VERSION = "1.2.1"
 
 @click.group()
 def cli():
@@ -16,13 +16,14 @@ def cli():
 @click.option('--detect', type=click.Choice(['sift', 'loftr']), default='loftr', help='Détecteur à utiliser')
 @click.option('--clahe', is_flag=True, default=False, help='Appliquer un filtre CLAHE avant détection')
 @click.option('--sift-nfeatures', type=int, default=3000, help='Nombre de points SIFT (défaut 2000)')
-@click.option('--nb-points', type=int, default=1500, help='Nombre de points max à garder par paire (défaut 1500)')
+@click.option('--nb-points', type=int, default=1000, help='Nombre de points max à garder par paire (défaut 1000)')
 @click.option('--n-jobs', type=int, default=1, help='Nombre de processus pour la parallélisation (défaut 1)')
-def all(pattern, size, detect, clahe, sift_nfeatures, nb_points, n_jobs):
+@click.option('--test', is_flag=True, default=False, help='Dry-run : génère un fichier de test des paires sans calculer les points')
+def all(pattern, size, detect, clahe, sift_nfeatures, nb_points, n_jobs, test):
     """Calcul pour toutes les paires possibles."""
     import time
     from homolcraft.utils import find_images
-    from homolcraft.core.pairs import all_pairs
+    from homolcraft.core.pairs import all_pairs as core_all_pairs
     from homolcraft.core.detectors import SIFTDetector, LoFTRDetector
     from homolcraft.core.matchers import match_sift
     from homolcraft.core.io import read_image
@@ -50,26 +51,7 @@ def all(pattern, size, detect, clahe, sift_nfeatures, nb_points, n_jobs):
     if len(images) < 2:
         click.echo("Moins de 2 images trouvées.")
         return
-    N = len(images)
-    pairs_done = set()
-    pairs = []
-    for i, img1 in enumerate(images):
-        for d in range(1, delta+1):
-            # Voisin aval
-            j_plus = (i + d) % N if circ else i + d
-            if j_plus < N and j_plus != i:
-                key = tuple(sorted((i, j_plus)))
-                if key not in pairs_done:
-                    pairs.append((img1, images[j_plus]))
-                    pairs_done.add(key)
-            # Voisin amont
-            j_minus = (i - d) % N if circ else i - d
-            if j_minus >= 0 and j_minus != i:
-                key = tuple(sorted((i, j_minus)))
-                if key not in pairs_done:
-                    pairs.append((img1, images[j_minus]))
-                    pairs_done.add(key)
-    pairs = list(pairs)
+    pairs = core_all_pairs(images)
     img_dir = os.path.dirname(os.path.abspath(images[0]))
     out_dir = os.path.join(img_dir, "Homol")
     # Sauvegarde Homol existant
@@ -211,7 +193,7 @@ def all(pattern, size, detect, clahe, sift_nfeatures, nb_points, n_jobs):
         detection_t1 = time.time()
         log(f"[STATS] Détection SIFT : {detection_t1-detection_t0:.1f} sec", logf)
         matching_t0 = time.time()
-        # --- Boucle d'écriture finale Homol (symétrique Micmac) ---
+        # --- Boucle d'écriture finale Homol (symétrique Micmac, uniquement pour les vrais voisins) ---
         for img1, img2 in pairs:
             key1 = os.path.basename(img1)
             key2 = os.path.basename(img2)
@@ -244,20 +226,6 @@ def all(pattern, size, detect, clahe, sift_nfeatures, nb_points, n_jobs):
         selection_t1 = time.time()
         log(f"[STATS] Sélection spatiale : {selection_t1-selection_t0:.1f} sec", logf)
         ecriture_t0 = time.time()
-        for img in images:
-            d1 = os.path.join(out_dir, f"Pastis{os.path.basename(img)}")
-            os.makedirs(d1, exist_ok=True)
-            for img2 in images:
-                if img == img2:
-                    continue
-                key2 = os.path.basename(img2)
-                pts = final_points[img][key2]
-                if pts:
-                    out_path = os.path.join(d1, f"{key2}.txt")
-                    with open(out_path, 'w') as f:
-                        for pt in pts:
-                            f.write(f"{pt[0]:.6f} {pt[1]:.6f} {pt[2]:.6f} {pt[3]:.6f} {pt[4]:.6f}\n")
-                    print(f"[Homol] {os.path.basename(img)} - {key2} : {len(pts)} tie points écrits")
         ecriture_t1 = time.time()
         log(f"[STATS] Ecriture Homol : {ecriture_t1-ecriture_t0:.1f} sec", logf)
         print("[CHECKPOINT] Fin de la boucle d'écriture finale Homol")
@@ -266,6 +234,13 @@ def all(pattern, size, detect, clahe, sift_nfeatures, nb_points, n_jobs):
         if os.path.exists(tmp_dir):
             import shutil
             shutil.rmtree(tmp_dir)
+        if test:
+            # Dry-run : on écrit la liste des paires dans un fichier JSON
+            out = {"images": images, "pairs": [(os.path.basename(a), os.path.basename(b)) for a, b in pairs]}
+            with open("homolcraft_test_pairs.json", "w") as f:
+                json.dump(out, f, indent=2)
+            click.echo(f"[TEST] Dry-run : {len(pairs)} paires générées. Voir homolcraft_test_pairs.json.")
+            return
         return finalize(stats, out_dir, t0, pattern, size, detect, clahe, sift_nfeatures, nb_points, n_jobs, logf, log)
     elif detect == "loftr":
         detector = LoFTRDetector(device="cpu")
@@ -407,7 +382,8 @@ def all(pattern, size, detect, clahe, sift_nfeatures, nb_points, n_jobs):
 @click.option('--n-jobs', type=int, default=1, help='Nombre de processus pour la parallélisation (défaut 1)')
 @click.option('--delta', type=int, default=1, help='Nombre de voisins à considérer (défaut 1)')
 @click.option('--circ', is_flag=True, default=False, help='Activer le mode circulaire (matcher les premières et dernières images)')
-def line(pattern, size, detect, clahe, sift_nfeatures, nb_points, n_jobs, delta, circ):
+@click.option('--test', is_flag=True, default=False, help='Dry-run : génère un fichier de test des paires sans calculer les points')
+def line(pattern, size, detect, clahe, sift_nfeatures, nb_points, n_jobs, delta, circ, test):
     """Calcul restreint aux paires voisines (structure linéaire ou circulaire)."""
     import time
     from homolcraft.utils import find_images
@@ -438,25 +414,7 @@ def line(pattern, size, detect, clahe, sift_nfeatures, nb_points, n_jobs, delta,
         click.echo("Moins de 2 images trouvées.")
         return
     N = len(images)
-    pairs_done = set()
-    pairs = []
-    for i, img1 in enumerate(images):
-        for d in range(1, delta+1):
-            # Voisin aval
-            j_plus = (i + d) % N if circ else i + d
-            if j_plus < N and j_plus != i:
-                key = tuple(sorted((i, j_plus)))
-                if key not in pairs_done:
-                    pairs.append((img1, images[j_plus]))
-                    pairs_done.add(key)
-            # Voisin amont
-            j_minus = (i - d) % N if circ else i - d
-            if j_minus >= 0 and j_minus != i:
-                key = tuple(sorted((i, j_minus)))
-                if key not in pairs_done:
-                    pairs.append((img1, images[j_minus]))
-                    pairs_done.add(key)
-    pairs = list(pairs)
+    pairs = line_pairs(images, delta=delta, circ=circ)
     img_dir = os.path.dirname(os.path.abspath(images[0]))
     out_dir = os.path.join(img_dir, "Homol")
     # Sauvegarde Homol existant
@@ -588,7 +546,7 @@ def line(pattern, size, detect, clahe, sift_nfeatures, nb_points, n_jobs, delta,
         detection_t1 = time.time()
         log(f"[STATS] Détection SIFT : {detection_t1-detection_t0:.1f} sec", logf)
         matching_t0 = time.time()
-        # --- Boucle d'écriture finale Homol (symétrique Micmac) ---
+        # --- Boucle d'écriture finale Homol (symétrique Micmac, uniquement pour les vrais voisins) ---
         for img1, img2 in pairs:
             key1 = os.path.basename(img1)
             key2 = os.path.basename(img2)
@@ -616,20 +574,6 @@ def line(pattern, size, detect, clahe, sift_nfeatures, nb_points, n_jobs, delta,
         selection_t1 = time.time()
         log(f"[STATS] Sélection spatiale : {selection_t1-selection_t0:.1f} sec", logf)
         ecriture_t0 = time.time()
-        for img in images:
-            d1 = os.path.join(out_dir, f"Pastis{os.path.basename(img)}")
-            os.makedirs(d1, exist_ok=True)
-            for img2 in images:
-                if img == img2:
-                    continue
-                key2 = os.path.basename(img2)
-                pts = final_points[img][key2]
-                if pts:
-                    out_path = os.path.join(d1, f"{key2}.txt")
-                    with open(out_path, 'w') as f:
-                        for pt in pts:
-                            f.write(f"{pt[0]:.6f} {pt[1]:.6f} {pt[2]:.6f} {pt[3]:.6f} {pt[4]:.6f}\n")
-                    print(f"[Homol] {os.path.basename(img)} - {key2} : {len(pts)} tie points écrits")
         ecriture_t1 = time.time()
         log(f"[STATS] Ecriture Homol : {ecriture_t1-ecriture_t0:.1f} sec", logf)
         print("[CHECKPOINT] Fin de la boucle d'écriture finale Homol")
@@ -638,6 +582,12 @@ def line(pattern, size, detect, clahe, sift_nfeatures, nb_points, n_jobs, delta,
         if os.path.exists(tmp_dir):
             import shutil
             shutil.rmtree(tmp_dir)
+        if test:
+            out = {"images": images, "pairs": [(os.path.basename(a), os.path.basename(b)) for a, b in pairs]}
+            with open("homolcraft_test_pairs.json", "w") as f:
+                json.dump(out, f, indent=2)
+            click.echo(f"[TEST] Dry-run : {len(pairs)} paires générées. Voir homolcraft_test_pairs.json.")
+            return
         return finalize(stats, out_dir, t0, pattern, size, detect, clahe, sift_nfeatures, nb_points, n_jobs, logf, log)
     elif detect == "loftr":
         detector = LoFTRDetector(device="cpu")
@@ -831,6 +781,34 @@ def finalize(stats, out_dir, t0, pattern, size, detect, clahe, sift_nfeatures, n
                 f.write(f"  [STATS] {key} : {stats[key]:.1f}\n")
         f.write(f"  Temps total : {stats['elapsed_sec']:.1f} sec\n  Total matches : {stats['total_matches']}\n\n")
     click.echo(f"Terminé. Résultats dans {out_dir}/")
+
+def all_pairs(images):
+    """Retourne toutes les paires possibles d'images (img1, img2) avec img1 != img2."""
+    from itertools import combinations
+    return list(combinations(images, 2))
+
+def line_pairs(images, delta=1, circ=False):
+    """Retourne les paires voisines (avant/après, delta, circ)."""
+    N = len(images)
+    pairs_done = set()
+    pairs = []
+    for i, img1 in enumerate(images):
+        for d in range(1, delta+1):
+            # Voisin aval
+            j_plus = (i + d) % N if circ else i + d
+            if (circ or j_plus < N) and j_plus != i:
+                key = tuple(sorted((i, j_plus)))
+                if key not in pairs_done:
+                    pairs.append((img1, images[j_plus]))
+                    pairs_done.add(key)
+            # Voisin amont
+            j_minus = (i - d) % N if circ else i - d
+            if (circ or j_minus >= 0) and j_minus != i:
+                key = tuple(sorted((i, j_minus)))
+                if key not in pairs_done:
+                    pairs.append((img1, images[j_minus]))
+                    pairs_done.add(key)
+    return pairs
 
 if __name__ == '__main__':
     cli() 

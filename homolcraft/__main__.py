@@ -3,22 +3,30 @@ import numpy as np
 import time
 from itertools import combinations
 
-ALGO_VERSION = "1.2.1"
+ALGO_VERSION = "1.3.1"
 
 @click.group()
 def cli():
     """HomolCraft : Générateur de points homologues compatibles Micmac."""
     pass
 
+def common_options(func):
+    options = [
+        click.option('--size', type=int, default=1000, help="Taille d'image (optionnel)"),
+        click.option('--detect', type=click.Choice(['sift', 'loftr']), default='sift', help='Détecteur à utiliser'),
+        click.option('--clahe', is_flag=True, default=True, help='Appliquer un filtre CLAHE avant détection'),
+        click.option('--sift-nfeatures', type=int, default=2000, help='Nombre de points SIFT (défaut 2000)'),
+        click.option('--nb-points', type=int, default=500, help='Nombre de points max à garder par paire (défaut 500)'),
+        click.option('--n-jobs', type=int, default=8, help='Nombre de processus pour la parallélisation (défaut 8)'),
+        click.option('--test', is_flag=True, default=False, help='Dry-run : génère un fichier de test des paires sans calculer les points'),
+    ]
+    for opt in reversed(options):
+        func = opt(func)
+    return func
+
 @cli.command()
 @click.argument('pattern')
-@click.option('--size', type=int, help='Taille d\'image (optionnel)')
-@click.option('--detect', type=click.Choice(['sift', 'loftr']), default='loftr', help='Détecteur à utiliser')
-@click.option('--clahe', is_flag=True, default=False, help='Appliquer un filtre CLAHE avant détection')
-@click.option('--sift-nfeatures', type=int, default=3000, help='Nombre de points SIFT (défaut 2000)')
-@click.option('--nb-points', type=int, default=1000, help='Nombre de points max à garder par paire (défaut 1000)')
-@click.option('--n-jobs', type=int, default=1, help='Nombre de processus pour la parallélisation (défaut 1)')
-@click.option('--test', is_flag=True, default=False, help='Dry-run : génère un fichier de test des paires sans calculer les points')
+@common_options
 def all(pattern, size, detect, clahe, sift_nfeatures, nb_points, n_jobs, test):
     """Calcul pour toutes les paires possibles."""
     import time
@@ -37,6 +45,11 @@ def all(pattern, size, detect, clahe, sift_nfeatures, nb_points, n_jobs, test):
     import json
     import shutil
     import concurrent.futures
+    try:
+        import psutil
+        psutil_available = True
+    except ImportError:
+        psutil_available = False
 
     def log(msg, logf=None):
         ts = datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
@@ -64,8 +77,7 @@ def all(pattern, size, detect, clahe, sift_nfeatures, nb_points, n_jobs, test):
 
     log_path = os.path.join(out_dir, "log.txt")
     logf = open(log_path, "w")
-    log(f"--- Lancement pipeline ---", logf)
-    log(f"Version algo : {ALGO_VERSION}", logf)
+    log(f"--- Lancement homolcraft {ALGO_VERSION} ---", logf)
     log(f"Pattern utilisé : {pattern}", logf)
     log(f"Détecteur : {detect}", logf)
     log(f"Taille demandée : {size}", logf)
@@ -352,38 +364,46 @@ def all(pattern, size, detect, clahe, sift_nfeatures, nb_points, n_jobs, test):
         stats["per_pair"].append({"img1": img1, "img2": img2, "matches": len(points)})
     t1 = time.time()
     stats["elapsed_sec"] = t1-t0
-    stats["params"] = {"pattern": pattern, "size": size, "detect": detect, "clahe": clahe, "sift_nfeatures": sift_nfeatures}
-    stats["datetime"] = datetime.now().isoformat()
+    # Mesure RAM max
+    if psutil_available:
+        process = psutil.Process()
+        mem_info = process.memory_info()
+        ram_max_mb = mem_info.rss / 1024 / 1024
+        stats["ram_max_mb"] = ram_max_mb
+    else:
+        stats["ram_max_mb"] = None
+    # Calcul du vrai total matches exportés
+    total_matches = 0
+    for img1 in final_points:
+        for img2 in final_points[img1]:
+            total_matches += len(final_points[img1][img2])
+    stats["total_matches"] = total_matches
+    # Indicateurs de performance
+    stats["nb_images"] = len(images)
+    stats["nb_paires"] = len(pairs)
+    stats["time_per_pair"] = stats["elapsed_sec"] / stats["nb_paires"] if stats["nb_paires"] else 0
+    stats["pairs_per_sec"] = stats["nb_paires"] / stats["elapsed_sec"] if stats["elapsed_sec"] else 0
     log(f"--- Fin pipeline ---", logf)
     log(f"Temps total : {stats['elapsed_sec']:.1f} sec", logf)
-    log(f"Total paires traitées : {stats['pairs_done']}", logf)
-    log(f"Total matches : {stats['total_matches']}", logf)
+    log(f"Nombre d'images : {stats['nb_images']}", logf)
+    log(f"Nombre de paires : {stats['nb_paires']}", logf)
+    log(f"Total matches exportés : {stats['total_matches']}", logf)
+    log(f"Temps moyen par paire : {stats['time_per_pair']:.3f} sec", logf)
+    log(f"Paires/sec : {stats['pairs_per_sec']:.2f}", logf)
+    if stats["ram_max_mb"] is not None:
+        log(f"RAM max utilisée : {stats['ram_max_mb']:.1f} Mo", logf)
+    else:
+        log(f"RAM max : psutil non disponible", logf)
     logf.close()
-    # Log global à la racine
-    with open("homolcraft_run_log.txt", "a") as f:
-        f.write(f"[Version : {ALGO_VERSION}] ")
-        f.write(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Lancement pipeline HomolCraft\n")
-        f.write(f"  Pattern : {pattern}\n  Detecteur : {detect}\n  Taille : {size}\n  CLAHE : {clahe}\n  SIFT nfeatures : {sift_nfeatures if detect=='sift' else '-'}\n")
-        f.write(f"  Nb images : {len(images)}\n  Nb paires : {len(pairs)}\n")
-        f.write(f"  [STATS] Détection SIFT : {detection_t1-detection_t0:.1f} sec\n")
-        f.write(f"  [STATS] Matching SIFT : {matching_t1-matching_t0:.1f} sec\n")
-        f.write(f"  [STATS] Sélection spatiale : {selection_t1-selection_t0:.1f} sec\n")
-        f.write(f"  [STATS] Ecriture Homol : {ecriture_t1-ecriture_t0:.1f} sec\n")
-        f.write(f"  Temps total : {stats['elapsed_sec']:.1f} sec\n  Total matches : {stats['total_matches']}\n\n")
+    write_run_log(stats, pattern, detect, size, clahe, sift_nfeatures, nb_points, n_jobs)
     click.echo(f"Terminé. Résultats dans {out_dir}/")
 
 @cli.command()
 @click.argument('pattern')
-@click.option('--size', type=int, help="Taille d'image (optionnel)")
-@click.option('--detect', type=click.Choice(['sift', 'loftr']), default='loftr', help='Détecteur à utiliser')
-@click.option('--clahe', is_flag=True, default=False, help='Appliquer un filtre CLAHE avant détection')
-@click.option('--sift-nfeatures', type=int, default=3000, help='Nombre de points SIFT (défaut 2000)')
-@click.option('--nb-points', type=int, default=1500, help='Nombre de points max à garder par paire (défaut 1500)')
-@click.option('--n-jobs', type=int, default=1, help='Nombre de processus pour la parallélisation (défaut 1)')
+@common_options
 @click.option('--delta', type=int, default=1, help='Nombre de voisins à considérer (défaut 1)')
 @click.option('--circ', is_flag=True, default=False, help='Activer le mode circulaire (matcher les premières et dernières images)')
-@click.option('--test', is_flag=True, default=False, help='Dry-run : génère un fichier de test des paires sans calculer les points')
-def line(pattern, size, detect, clahe, sift_nfeatures, nb_points, n_jobs, delta, circ, test):
+def line(pattern, size, detect, clahe, sift_nfeatures, nb_points, n_jobs, test, delta, circ):
     """Calcul restreint aux paires voisines (structure linéaire ou circulaire)."""
     import time
     from homolcraft.utils import find_images
@@ -399,6 +419,7 @@ def line(pattern, size, detect, clahe, sift_nfeatures, nb_points, n_jobs, delta,
     from datetime import datetime
     import shutil
     import concurrent.futures
+    import json
 
     def log(msg, logf=None):
         ts = datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
@@ -705,13 +726,7 @@ def line(pattern, size, detect, clahe, sift_nfeatures, nb_points, n_jobs, delta,
     log(f"Total paires traitées : {stats['pairs_done']}", logf)
     log(f"Total matches : {stats['total_matches']}", logf)
     logf.close()
-    # Log global à la racine
-    with open("homolcraft_run_log.txt", "a") as f:
-        f.write(f"[Version : {ALGO_VERSION}] ")
-        f.write(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Lancement pipeline HomolCraft (mode LINE)\n")
-        f.write(f"  Pattern : {pattern}\n  Detecteur : {detect}\n  Taille : {size}\n  CLAHE : {clahe}\n  SIFT nfeatures : {sift_nfeatures if detect=='sift' else '-'}\n  Delta : {delta}\n  Circulaire : {circ}\n")
-        f.write(f"  Nb images : {len(images)}\n  Nb paires : {len(pairs)}\n")
-        f.write(f"  Temps total : {stats['elapsed_sec']:.1f} sec\n  Total matches : {stats['total_matches']}\n\n")
+    write_run_log(stats, pattern, detect, size, clahe, sift_nfeatures, nb_points, n_jobs, delta, circ)
     click.echo(f"Terminé. Résultats dans {out_dir}/")
 
 @cli.command()
@@ -770,16 +785,7 @@ def finalize(stats, out_dir, t0, pattern, size, detect, clahe, sift_nfeatures, n
     log(f"Total paires traitées : {stats['pairs_done']}", logf)
     log(f"Total matches : {stats['total_matches']}", logf)
     logf.close()
-    # Log global à la racine
-    with open("homolcraft_run_log.txt", "a") as f:
-        f.write(f"[Version : {ALGO_VERSION}] ")
-        f.write(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Lancement pipeline HomolCraft\n")
-        f.write(f"  Pattern : {pattern}\n  Detecteur : {detect}\n  Taille : {size}\n  CLAHE : {clahe}\n  SIFT nfeatures : {sift_nfeatures if detect=='sift' else '-'}\n  Nb points : {nb_points}\n  n_jobs : {n_jobs}\n")
-        # On loggue les timings si disponibles dans stats
-        for key in ["detection_t0", "detection_t1", "matching_t0", "matching_t1", "selection_t0", "selection_t1", "ecriture_t0", "ecriture_t1"]:
-            if key in stats:
-                f.write(f"  [STATS] {key} : {stats[key]:.1f}\n")
-        f.write(f"  Temps total : {stats['elapsed_sec']:.1f} sec\n  Total matches : {stats['total_matches']}\n\n")
+    write_run_log(stats, pattern, detect, size, clahe, sift_nfeatures, nb_points, n_jobs)
     click.echo(f"Terminé. Résultats dans {out_dir}/")
 
 def all_pairs(images):
@@ -809,6 +815,69 @@ def line_pairs(images, delta=1, circ=False):
                     pairs.append((img1, images[j_minus]))
                     pairs_done.add(key)
     return pairs
+
+def write_log_header(f, pattern, detect, size, clahe, sift_nfeatures, nb_points, n_jobs, delta=None, circ=None):
+    from datetime import datetime
+    f.write(f"[HomolCraft - Version : {ALGO_VERSION}] ")
+    f.write(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]
+")
+    f.write(f"  Pattern : {pattern}\n  Detecteur : {detect}\n  Taille : {size}\n  CLAHE : {clahe}\n  SIFT nfeatures : {sift_nfeatures if detect=='sift' else '-'}\n")
+    f.write(f"  Nb points : {nb_points}\n  n_jobs : {n_jobs}\n")
+    if delta is not None:
+        f.write(f"  Delta : {delta}\n")
+    if circ is not None:
+        f.write(f"  Circulaire : {circ}\n")
+
+def write_run_log(stats, pattern, detect, size, clahe, sift_nfeatures, nb_points, n_jobs, delta=None, circ=None):
+    from datetime import datetime
+    with open("homolcraft_run_log.txt", "a") as f:
+        write_log_header(f, pattern, detect, size, clahe, sift_nfeatures, nb_points, n_jobs, delta, circ)
+        f.write(f"  Nb images : {stats.get('nb_images','?')}\n  Nb paires : {stats.get('nb_paires','?')}\n  Nb paires exportées : {stats.get('nb_paires_exportees','?')}\n")
+        f.write(f"  Temps total : {stats.get('elapsed_sec',0):.1f} sec\n")
+        f.write(f"  Total matches exportés : {stats.get('total_matches','?')}\n")
+        f.write(f"  Temps moyen par paire : {stats.get('time_per_pair',0):.3f} sec\n")
+        f.write(f"  Paires/sec : {stats.get('pairs_per_sec',0):.2f}\n")
+        if stats.get("ram_max_mb") is not None:
+            f.write(f"  RAM max utilisée : {stats.get('ram_max_mb',0):.1f} Mo\n")
+        else:
+            f.write(f"  RAM max : psutil/resource non disponible\n")
+        f.write("\n")
+
+def compute_stats(images, pairs, final_points, t0, t1, ram_max_mb=None):
+    """Calcule toutes les stats de run pour le logging et le reporting."""
+    stats = {}
+    stats["elapsed_sec"] = t1 - t0
+    stats["nb_images"] = len(images)
+    stats["nb_paires"] = len(pairs)
+    stats["nb_paires_exportees"] = len(pairs)
+    # Total matches exportés (somme sur toutes les paires)
+    total_matches = 0
+    for img1 in final_points:
+        for img2 in final_points[img1]:
+            total_matches += len(final_points[img1][img2])
+    stats["total_matches"] = total_matches
+    stats["time_per_pair"] = stats["elapsed_sec"] / stats["nb_paires"] if stats["nb_paires"] else 0
+    stats["pairs_per_sec"] = stats["nb_paires"] / stats["elapsed_sec"] if stats["elapsed_sec"] else 0
+    stats["ram_max_mb"] = ram_max_mb
+    return stats
+
+def get_ram_max_mb():
+    try:
+        import psutil
+        process = psutil.Process()
+        mem_info = process.memory_info()
+        return mem_info.rss / 1024 / 1024
+    except ImportError:
+        try:
+            import resource
+            ram = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+            # Sur macOS/Linux, ru_maxrss est en Ko ou en octets selon la plateforme
+            if ram > 10**7:  # probablement octets
+                return ram / 1024 / 1024
+            else:  # probablement Ko
+                return ram / 1024
+        except ImportError:
+            return None
 
 if __name__ == '__main__':
     cli() 

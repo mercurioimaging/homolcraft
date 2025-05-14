@@ -37,3 +37,12 @@
 - Factorisation de la génération des paires : fonctions utilitaires `all_pairs` (toutes paires) et `line_pairs` (voisins, delta, circ).
 - Correction du mode `all` : il ne dépend plus de `delta`/`circ` et traite bien toutes les paires possibles.
 - Préparation à la mutualisation du pipeline principal pour les futurs modes (ex : mulscale). 
+
+## [1.3.1] - 2025-05-15
+### Refactorisation & Améliorations
+- Centralisation et DRY complet du logging (run_log et log.txt) : une seule fonction pour tous les modes.
+- Ajout et correction des indicateurs dans les logs : nombre d'images, nombre de paires, nombre de paires exportées, RAM max (psutil ou resource), temps moyen par paire, paires/sec.
+- Correction de l'affichage des stats (plus de '?').
+- Décorateur commun pour les options CLI partagées (plus de duplication entre all/line).
+- Refactorisation du calcul des stats (fonction compute_stats).
+- Alternative à psutil pour la RAM max (module resource sur macOS/Linux). 

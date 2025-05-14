@@ -8,4 +8,5 @@ click
 pyinstaller
 logging
 Pillow
-matplotlib 
+matplotlib
+psutil 

@@ -14,7 +14,7 @@ except PackageNotFoundError:                     # développement hors-paquet
     __version__ = "0.0.0.dev0"
 
 # Version courante de l'algorithme HomolCraft
-ALGO_VERSION = "3.0.0"
+ALGO_VERSION = "3.3.0"
 
 # API publique
 from .pipeline import Settings, Mode, run

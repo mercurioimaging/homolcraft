@@ -117,6 +117,10 @@ def write_run_log(
     mode="all",
     delta=None,
     circ=None,
+    thresh_strategy=None,
+    thresh_factor=None,
+    thresh_fixed=None,
+    sift_nfeat_low=None,
 ):
     """Append un résumé d'exécution dans *homolcraft_run_log.txt*."""
     log_file = "homolcraft_run_log.txt"
@@ -124,6 +128,7 @@ def write_run_log(
     hostname = socket.gethostname()
 
     lines = [
+        f"",
         f"==== HomolCraft run {timestamp} ====",
         f"Algorithm version: {algo_version}",
         f"Host: {hostname}",
@@ -144,17 +149,53 @@ def write_run_log(
         lines.append(f"  - delta: {delta}")
     if circ is not None:
         lines.append(f"  - circ: {circ}")
-
-    # taille Homol estimée
-    if isinstance(stats, dict) and "total_points_exported" in stats:
-        _, sz = estimate_homol_size(stats["total_points_exported"])
-        stats["estimated_homol_size"] = sz
+        
+    # Ajouter paramètres spécifiques au mode mulscale
+    if mode == "mulscale":
+        if thresh_strategy is not None:
+            lines.append(f"  - thresh_strategy: {thresh_strategy}")
+        if thresh_factor is not None:
+            lines.append(f"  - thresh_factor: {thresh_factor}")
+        if thresh_fixed is not None:
+            lines.append(f"  - thresh_fixed: {thresh_fixed}")
+        if sift_nfeat_low is not None:
+            lines.append(f"  - sift_nfeat_low: {sift_nfeat_low}")
 
     # Ajout des stats
     lines.append("Stats:")
-    if isinstance(stats, dict):
+    
+    # Gestion spéciale pour le mode mulscale avec statistiques structurées
+    if isinstance(stats, dict) and "coarse_pass" in stats and "high_res_pass" in stats:
+        # Stats de la passe basse résolution
+        lines.append("  Passe rapide (basse résolution):")
+        for k, v in stats["coarse_pass"].items():
+            lines.append(f"    - {k}: {v:.3f}" if isinstance(v, float) else f"    - {k}: {v}")
+        
+        # Stats de la passe haute résolution
+        lines.append("  Passe précise (haute résolution):")
+        # Travailler sur une copie du dictionnaire pour éviter la modification pendant l'itération
+        high_res = stats["high_res_pass"].copy()
+        
+        # Calculer la taille estimée Homol
+        if "total_points_exported" in high_res:
+            _, sz = estimate_homol_size(high_res["total_points_exported"])
+            high_res["estimated_homol_size"] = sz
+            
+        # Afficher toutes les stats
+        for k, v in high_res.items():
+            lines.append(f"    - {k}: {v:.3f}" if isinstance(v, float) else f"    - {k}: {v}")
+            
+        # Temps total
+        if "elapsed_total" in stats:
+            lines.append(f"  - temps_total: {stats['elapsed_total']:.3f}s")
+    
+    # Format standard pour les autres modes
+    elif isinstance(stats, dict):
         for k, v in stats.items():
             lines.append(f"  - {k}: {v:.3f}" if isinstance(v, float) else f"  - {k}: {v}")
+        if "total_points_exported" in stats:
+            _, sz = estimate_homol_size(stats["total_points_exported"])
+            lines.append(f"  - estimated_homol_size: {sz}")
     else:
         for k in dir(stats):
             if not k.startswith("_"):

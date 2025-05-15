@@ -32,6 +32,19 @@ def _launch(mode: Mode, **kw):
         log_params['sift_nfeatures'] = log_params.pop('sift_nfeat')
     if 'nb_pts_min' in log_params:
         log_params['nb_pts_mini'] = log_params.pop('nb_pts_min')
+    # Supprimer xml_path des paramètres de log pour le mode mulscale
+    if mode == Mode.MULSCALE and 'xml_path' in log_params:
+        log_params.pop('xml_path')
+    # S'assurer que les paramètres spécifiques au mulscale sont présents
+    if mode == Mode.MULSCALE:
+        if 'thresh_strategy' not in log_params:
+            log_params['thresh_strategy'] = st.thresh_strategy
+        if 'thresh_factor' not in log_params:
+            log_params['thresh_factor'] = st.thresh_factor
+        if 'thresh_fixed' not in log_params:
+            log_params['thresh_fixed'] = st.thresh_fixed
+        if 'sift_nfeat_low' not in log_params:
+            log_params['sift_nfeat_low'] = st.sift_nfeat_low
     write_run_log(stats=stats, algo_version=ALGO_VERSION, mode=mode.name.lower(), **log_params)
     click.echo(f"\n✓ Terminé : {stats}")
 
@@ -66,5 +79,18 @@ def file(pattern, xml_path, **kw):
               default="auto")
 @click.option("--thresh-factor", default=.5, type=float)
 @click.option("--thresh-fixed", default=50, type=int)
+@click.option("--sift-nfeat-low", default=500, type=int, 
+              help="Nombre de points SIFT à détecter pour la passe rapide (la passe haute résolution utilisera --sift-nfeat)")
 def mulscale(pattern, **kw):
+    """
+    Traitement en deux passes (rapide puis précise) pour optimiser le calcul des points homologues.
+    
+    1. Passe rapide (basse résolution) : utilise --sift-nfeat-low pour détecter moins de points
+    2. Passe précise (haute résolution) : utilise --sift-nfeat uniquement sur les paires pertinentes
+    
+    Les points homologues finaux sont écrits dans le dossier Homol.
+    """
+    # Convertir xml_path en Path si présent
+    if kw.get('xml_path'):
+        kw['xml_path'] = Path(kw['xml_path'])
     _launch(Mode.MULSCALE, pattern=pattern, **kw)

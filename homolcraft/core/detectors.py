@@ -9,12 +9,13 @@ puis renvoie (keypoints, descriptors).
 """
 
 from pathlib import Path
-from typing import Tuple, List
+from typing import Tuple, List, Any
 
 import cv2
 import numpy as np
 
 from .io import read_image   # même dossier « core »
+from homolcraft.core import IMAGE_PROCESSING_INFO # Import du dictionnaire depuis homolcraft.core
 
 # ---------------------------------------------------------------------------
 # Classes de bas niveau déjà présentes --------------------------------------
@@ -46,8 +47,15 @@ class LoFTRDetector:
 
 def _preprocess(path: str | Path, resize_max: int | None, clahe: bool):
     """Lit, redimensionne et applique éventuellement un CLAHE, retourne l’image *grise*."""
-    img = read_image(str(path), size=resize_max, clahe=clahe)
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    img_color, original_shape, scale_factor = read_image(str(path), size=resize_max, clahe=clahe)
+    gray = cv2.cvtColor(img_color, cv2.COLOR_BGR2GRAY)
+    
+    # Store processing info
+    IMAGE_PROCESSING_INFO[str(path)] = {
+        "original_shape": original_shape, # (h_orig, w_orig)
+        "scale_factor": scale_factor,
+        "resized_shape": gray.shape # (h_resized, w_resized)
+    }
     return gray
 
 

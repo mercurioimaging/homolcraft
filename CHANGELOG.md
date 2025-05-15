@@ -1,5 +1,38 @@
 # Changelog HomolCraft
 
+## [3.2.1] - 2025-07-10
+### Corrections
+- Le dossier Homol est maintenant créé dans le même répertoire que les images source pour tous les modes (all, line, file et mulscale)
+- Cette correction uniformise le comportement d'écriture des fichiers entre tous les modes et suit le principe DRY
+
+## [3.2.0] - 2025-07-10
+### Améliorations
+- **[mulscale]** Le mode mulscale effectue maintenant automatiquement les deux passes (basse puis haute résolution)
+- **[mulscale]** La deuxième passe utilise désormais automatiquement les paires sélectionnées lors de la première passe
+- **[mulscale]** Amélioration de la journalisation avec une section dédiée pour chaque passe dans le run_log
+- **[mulscale]** Meilleure documentation de l'usage des paramètres sift_nfeat et sift_nfeat_low
+
+## [3.1.0] - 2025-07-09
+### Améliorations
+- **[mulscale]** Ajout du paramètre `--sift-nfeat-low` (défaut: 500) pour contrôler le nombre de points SIFT détectés lors de la passe rapide
+- **[mulscale]** Le fichier XML est maintenant placé dans le dossier des images analysées plutôt qu'à la racine du projet
+- **[mulscale]** Affichage de la commande à exécuter pour la deuxième passe (mode `file`) dans les statistiques
+- **[mulscale]** Amélioration de la journalisation des paramètres spécifiques au mode mulscale
+
+## [3.0.1] - 2025-07-08
+### Corrections
+- Correction d'une erreur dans le mode mulscale qui provoquait un "TypeError: write_run_log() got an unexpected keyword argument 'xml_path'"
+- Amélioration de la gestion des paramètres spécifiques au mode mulscale dans les logs (thresh_strategy, thresh_factor, thresh_fixed)
+- Conversion correcte du paramètre xml_path en objet Path
+
+## [3.0.0] - 2025-07-01
+### Améliorations majeures
+- Refactorisation complète du pipeline pour une meilleure maintenabilité et extensibilité
+- Introduction du nouveau mode `mulscale` pour un traitement optimisé des images en deux passes
+- Implémentation d'un système de journalisation amélioré avec statistiques détaillées
+- Uniformisation des paramètres entre les différents modes (all, line, file, mulscale)
+- Compatibilité complète avec le format Micmac pour tous les modes
+
 ## [2.1.2] - 2025-07-07
 ### Corrections
 - Correction d'une erreur "AttributeError: 'Settings' object has no attribute 'detector'" en remplaçant "detector" par "detect"
@@ -12,7 +45,7 @@
 - **[mulscale]** Ajout d'une gestion spéciale des paires inter-jeux de données dans le mode mulscale
 - **[mulscale]** Un seuil plus souple est maintenant appliqué aux paires d'images provenant de différents jeux (préfixes différents)
 - **[mulscale]** Ajout d'un export des statistiques détaillées au format JSON pour faciliter l'analyse
-- **[mulscale]** Amélioration du graphique de distribution avec différenciation visuelle des paires intra et inter-jeux 
+- **[mulscale]** Amélioration du graphique de distribution avec différenciation visuelle des paires intra et inter-jeux
 
 ## [2.1.0] - 2025-07-05
 ### Nouvelles fonctionnalités
@@ -128,56 +161,15 @@
 - CLI commands `all` and `line` in `__main__.py` now delegate their core logic to `run_pipeline`.
 - Simplified logic in `__main__.py` by removing duplicated code for detection, matching, selection, and export, now handled by the refactored pipeline.
 - Updated logging to reflect the new pipeline structure and include statistics on rejected points.
-- `ALGO_VERSION` updated to `1.4.0`.
+- `ALGO_VERSION` updated to `
 
-### Removed
-- Old SIFT/LoFTR detection and matching logic from `__main__.py` commands.
-- Functions `select_spatially`, `all_pairs`, `line_pairs` (module-level versions), `finalize`, `compute_stats`, `export_homol_pairs` from `__main__.py` as their responsibilities are now covered by the new pipeline or re-implemented locally if still needed (e.g., `get_ram_max_mb`).
-- Temporary `*.npy` file storage for matches is no longer used by the new pipeline. 
+## [3.3.0] - YYYY-MM-DD
+### Améliorations
+- **Matching robuste** : Intégration d'un filtre RANSAC (homographie) après le test de ratio de Lowe pour éliminer les faux positifs (`core/matchers.py`). Conserve un minimum de 4 inliers.
+- **Popularité des points** : Prise en compte de l'occurrence des points d'intérêt à travers de multiples paires d'images. Le score de Lowe est pondéré par cette "popularité", favorisant les points fréquemment observés (`pipeline.py`).
+- **Échantillonnage spatial** : Application d'un échantillonnage spatial dans une grille 4x4 lors de l'export des points homologues pour assurer une meilleure répartition et éviter la concentration des points (`core/export.py`).
+- **Pipeline de filtrage affiné** : Le processus de filtrage final des correspondances inclut désormais le tri par score Lowe/popularité, un buffer, l'échantillonnage spatial, et des seuils min/max de points (`core/export.py`).
+- **[mulscale]** Clarification : la première passe (coarse) du mode `mulscale` reste une évaluation brute du nombre de correspondances par paire, sans RANSAC, popularité ou échantillonnage spatial, avant l'application des stratégies de seuillage (`pipeline.py`).
 
-## [1.4.1] - 2025-06-05
-### Fixed
-- Corrected a `TypeError` in CLI option handling (`_add_opts` in `__main__.py`) that prevented the program from running. 
-
-## [1.4.2] - 2025-06-05
-### Fixed
-- Corrected an `AttributeError: 'function' object has no attribute 'params'` in CLI option handling (`_add_opts` in `__main__.py`). Options are now correctly added using the `__click_params__` attribute of the decorated function, ensuring compatibility with Click's command creation process. 
-
-## [2.0.0] - 2025-06-05
-### Major Refactoring & Enhancements
-- **Core Pipeline Rearchitected (`homolcraft/refactor.py`):**
-    - Introduction of `run_pipeline()` as the central orchestrator, unifying logic for all processing modes.
-    - Clear 5-stage pipeline:
-        1.  Pair generation (`_all_pairs`, `_line_pairs`)
-        2.  Feature detection (SIFT, LoFTR via `_make_detectors`)
-        3.  Matching (including RANSAC filtering)
-        4.  Multiplicity-first spatial selection (`_compute_multiplicity`, `_select_spatially`)
-        5.  Optimized MicMac Homol export (`_export_homol_pairs`)
-    - Each stage is designed as a pure function where possible, improving testability and maintainability.
-- **Multiplicity-based Point Prioritization:**
-    - Tie-points observed in multiple images are now globally scored and prioritized *before* grid-based spatial selection, ensuring the most robust points are selected.
-- **Optimized Homol Export:**
-    - Parallelized I/O for writing Homol files using `ThreadPoolExecutor` (controlled by `write_workers` in `run_pipeline`).
-    - Symmetric writing (e.g., `img1/img2.txt` and `img2/img1.txt`) is handled efficiently within a single processing step for each pair.
-- **Simplified Logging:**
-    - Standard output (`stdout`) is now the primary channel for progress and informational messages.
-    - `homolcraft_run_log.txt` (via `homolcraft.utils.write_run_log`) receives a concise summary of each run, including key statistics. The verbose `log.txt` has been removed.
-- **Streamlined CLI (`homolcraft/__main__.py`):**
-    - `COMMON_OPTS` and a generic `_run()` function reduce redundancy between `all` and `line` commands.
-    - No more `--test` flag; the core logic is robust.
-    - Explicit short aliases for CLI options to prevent conflicts (e.g., `-t/--detect`, `-s/--size`, `-p/--nb-points`, `-j/--n-jobs`).
-- **Bug Fixes:**
-    - Resolved `TypeError: Name 'd' defined twice` by assigning explicit, unique short aliases to CLI options. `--detect` is now `-t`, allowing `--delta` to use `-d` without collision.
-    - Fixed previous `TypeError` and `AttributeError` issues related to `click` option handling in `_add_opts`.
-
-### Changed
-- `ALGO_VERSION` updated to `2.0.0`.
-
-### Removed
-- Redundant logic in `__main__.py` now handled by `run_pipeline`.
-- Old ad-hoc selection and export mechanisms.
-- `log.txt` file. 
-
-## [2.0.1] - 2025-06-05
-### Fixed
-- Correction d'une erreur `ValueError: too many values to unpack (expected 2)` dans `_export_homol_pairs` de `homolcraft/refactor.py` lors de l'utilisation de `write_workers > 1`. Le problème était lié à une tentative incorrecte de déballer les éléments de l'itérateur `tqdm` qui retournait des tuples à 3 éléments et non des paires. 
+### Corrections
+- **[mulscale]** Correction d'un `TypeError` dans la fonction `_export` lors de la deuxième passe du mode `mulscale` (mode `file`). L'erreur se produisait lors de la détermination du répertoire des images sources.

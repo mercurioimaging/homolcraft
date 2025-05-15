@@ -1,11 +1,71 @@
 # Changelog HomolCraft
 
+## [2.1.2] - 2025-07-07
+### Corrections
+- Correction d'une erreur "AttributeError: 'Settings' object has no attribute 'detector'" en remplaçant "detector" par "detect"
+- Correction d'une erreur "list indices must be integers or slices, not str" dans le matcher SIFT
+- Amélioration des paramètres de `write_run_log` pour rendre delta et circ optionnels afin de supporter tous les modes
+- Refactorisation de `_par_map` pour retourner un dictionnaire clair {élément: résultat} et éviter les erreurs d'indexation
+
+## [2.1.1] - 2025-07-06
+### Améliorations
+- **[mulscale]** Ajout d'une gestion spéciale des paires inter-jeux de données dans le mode mulscale
+- **[mulscale]** Un seuil plus souple est maintenant appliqué aux paires d'images provenant de différents jeux (préfixes différents)
+- **[mulscale]** Ajout d'un export des statistiques détaillées au format JSON pour faciliter l'analyse
+- **[mulscale]** Amélioration du graphique de distribution avec différenciation visuelle des paires intra et inter-jeux 
+
+## [2.1.0] - 2025-07-05
+### Nouvelles fonctionnalités
+- Ajout de la stratégie multi-échelle (mulscale) pour optimiser le calcul des points homologues :
+  - Nouvelle commande `mulscale` : passe préliminaire à basse résolution avec SIFT réduit (500 points)
+  - Génération d'un fichier XML au format MicMac (`SauvegardeNamedRel`) contenant uniquement les paires pertinentes
+  - Stratégies intelligentes de sélection des paires :
+    - `fixed` : Seuil fixe défini par `--match-threshold`
+    - `mean` : Seuil relatif à la moyenne (moyenne × facteur)
+    - `median` : Seuil relatif à la médiane (médiane × facteur)
+    - `auto` : Seuil automatique basé sur la distribution (par défaut)
+  - Génération de graphiques de distribution des matches pour aider à visualiser et ajuster les seuils
+  - Analyse statistique des matches (min, max, moyenne, médiane, écart-type)
+  - Enchaînement automatique avec la passe haute définition utilisant les paramètres standards
+- Ajout du mode `file` pour traiter uniquement les paires définies dans un fichier XML :
+  - Lecture des couples d'images depuis un fichier au format `SauvegardeNamedRel`
+  - Optimisation du traitement en se concentrant uniquement sur les paires ayant un fort potentiel de correspondance
+- Amélioration de l'interface utilisateur avec des messages adaptés au mode utilisé et une documentation détaillée
+
+## [2.0.5] - 2025-07-02
+### Optimisations
+- Optimisation majeure de la phase d'export : préchargement des dimensions des images pour éviter les relectures multiples
+- Amélioration de l'écriture des fichiers Homol avec utilisation d'un buffer pour réduire les opérations d'accès disque
+- Réduction significative du temps d'export, spécialement pour les datasets avec beaucoup d'images
+
+## [2.0.4] - 2025-07-01
+### Corrections
+- Correction de la barre de progression lors de l'export des points homologues en mode parallèle
+- Amélioration du retour visuel pendant la phase d'écriture des fichiers Homol pour mieux refléter l'avancement réel du processus
+- Correction de la gestion du dossier Homol_bkp pour éviter l'erreur "Destination path already exists" lors d'exécutions successives
+- Amélioration de la robustesse de la sauvegarde des résultats précédents
+- Correction de l'erreur "Stats.__init__() got an unexpected keyword argument 'rejection_rate'" en ajoutant les champs manquants dans la classe Stats
+
+## [2.0.3] - 2025-06-30
+### Améliorations
+- Ajout du paramètre `--nb-pts-mini` (par défaut à 25) pour définir un seuil minimum de points homologues en dessous duquel les fichiers ne sont pas créés
+- Réduction de la précision des coordonnées des points homologues de 6 à 3 décimales pour alléger les fichiers
+- Amélioration de la gestion des faux positifs en filtrant les paires avec trop peu de points correspondants
+- Comptabilisation améliorée des points rejetés dans les statistiques
+
+## [2.0.2] - 2025-06-15
+### Améliorations
+- Ajout du paramètre `--progress` pour contrôler l'affichage des barres de progression
+- Passage de la variable `ALGO_VERSION` au logger dans `write_run_log`
+- Gestion plus robuste des erreurs avec try/except lors de la génération des points homologues
+- Les erreurs sont maintenant loggées dans le fichier `homolcraft_run_log.txt`
+
 ## [1.1.0] - 2025-05-14
 ### Ajouts
 - Versionning majeur.mineur.révision ajouté (ALGO_VERSION)
 - Logs détaillés par étape (détection, matching, sélection spatiale, écriture) dans le run_log
 - Écriture systématique des deux fichiers Homol pour chaque paire (img1->img2 et img2->img1)
-- Optimisation du matching : chaque paire n'est matchée qu'une seule fois (img1 < img2)
+- Optimisation du matching : chaque paire n'est matchée qu'une seule fois (img1 < img2)
 
 ### Modifications
 - Sélection spatiale améliorée pour garantir une bonne répartition des tie points
@@ -34,14 +94,14 @@
 
 ## [1.3.0] - 2025-05-15
 ### Refactorisation
-- Factorisation de la génération des paires : fonctions utilitaires `all_pairs` (toutes paires) et `line_pairs` (voisins, delta, circ).
-- Correction du mode `all` : il ne dépend plus de `delta`/`circ` et traite bien toutes les paires possibles.
-- Préparation à la mutualisation du pipeline principal pour les futurs modes (ex : mulscale). 
+- Factorisation de la génération des paires : fonctions utilitaires `all_pairs` (toutes paires) et `line_pairs` (voisins, delta, circ).
+- Correction du mode `all` : il ne dépend plus de `delta`/`circ` et traite bien toutes les paires possibles.
+- Préparation à la mutualisation du pipeline principal pour les futurs modes (ex : mulscale). 
 
 ## [1.3.1] - 2025-05-15
 ### Refactorisation & Améliorations
-- Centralisation et DRY complet du logging (run_log et log.txt) : une seule fonction pour tous les modes.
-- Ajout et correction des indicateurs dans les logs : nombre d'images, nombre de paires, nombre de paires exportées, RAM max (psutil ou resource), temps moyen par paire, paires/sec.
+- Centralisation et DRY complet du logging (run_log et log.txt) : une seule fonction pour tous les modes.
+- Ajout et correction des indicateurs dans les logs : nombre d'images, nombre de paires, nombre de paires exportées, RAM max (psutil ou resource), temps moyen par paire, paires/sec.
 - Correction de l'affichage des stats (plus de '?').
 - Décorateur commun pour les options CLI partagées (plus de duplication entre all/line).
 - Refactorisation du calcul des stats (fonction compute_stats).
@@ -50,9 +110,9 @@
 ## [1.3.2] - 2025-05-14
 ### Correction de performance et robustesse
 - Suppression de la double boucle de sélection spatiale par paire (phase post-matching) qui causait un ralentissement majeur.
-- Optimisation de la structure de la sélection spatiale : un seul passage, plus de recalcul inutile.
+- Optimisation de la structure de la sélection spatiale : un seul passage, plus de recalcul inutile.
 - Progress bar explicite pour la phase de sélection spatiale et d'écriture Homol.
-- Correction du compteur de paires exportées (stats) : le nombre affiché reflète désormais la réalité.
+- Correction du compteur de paires exportées (stats) : le nombre affiché reflète désormais la réalité.
 - Maintien de la compatibilité Micmac (symétrie d'écriture). 
 
 ## [1.4.0] - YYYY-MM-DD

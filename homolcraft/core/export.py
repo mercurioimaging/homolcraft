@@ -43,7 +43,7 @@ def export_micmac_homol(base_dir: str,
     if not info1 or not info2:
         # Fallback ou erreur si les infos ne sont pas trouvées (ne devrait pas arriver)
         # Pour l'instant, on écrit sans scaling si info non trouvée, mais un warning serait bien
-        print(f"Warning: Processing info not found for {path1_full} or {path2_full}. Points might not be scaled.")
+        print(f"Warning: Processing info not found for {path1_full} or {path2_full}. Using default validation.")
         scale1, orig_shape1_wh = 1.0, None 
         scale2, orig_shape2_wh = 1.0, None
     else:
@@ -82,19 +82,29 @@ def _write_one(path: str, pts: List[Point],
 
             # Vérification des limites des points dans les images originales
             # 0 ≤ x < largeur et 0 ≤ y < hauteur
-            # Initialiser la validité à False. Un point n'est valide que si les dimensions sont connues ET qu'il est dedans.
             valid_pt1 = False
+            valid_pt2 = False
+            
             if shape1_wh: # shape1_wh is (width, height)
                 if (0 <= x1_orig < shape1_wh[0] and 0 <= y1_orig < shape1_wh[1]):
                     valid_pt1 = True
+            else:
+                # Si les dimensions ne sont pas connues, on applique une validation par défaut
+                # basée sur des limites raisonnables (éviter les valeurs négatives et trop grandes)
+                if (0 <= x1_orig < 10000 and 0 <= y1_orig < 10000):
+                    valid_pt1 = True
             
-            valid_pt2 = False
             if shape2_wh: # shape2_wh is (width, height)
                 if (0 <= x2_orig < shape2_wh[0] and 0 <= y2_orig < shape2_wh[1]):
                     valid_pt2 = True
+            else:
+                # Si les dimensions ne sont pas connues, on applique une validation par défaut
+                # basée sur des limites raisonnables (éviter les valeurs négatives et trop grandes)
+                if (0 <= x2_orig < 10000 and 0 <= y2_orig < 10000):
+                    valid_pt2 = True
             
             if valid_pt1 and valid_pt2:
-                f.write(f"{x1_orig:.6f} {y1_orig:.6f} {x2_orig:.6f} {y2_orig:.6f} {score:.6f}\n")
+                f.write(f"{x1_orig:.6f} {y1_orig:.6f} {x2_orig:.6f} {y2_orig:.6f}\n")
 
 
 # ---------------------------------------------------------------------------

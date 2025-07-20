@@ -1,5 +1,22 @@
 # Changelog HomolCraft
 
+## [3.2.3] - 2025-01-06
+### Améliorations majeures
+- **Normalisation automatique des images** : Vérification et normalisation automatique de l'orientation et de la résolution des images avant traitement
+- **Intégration fix_orientation** : Appel automatique du script `fix_orientation.py` si les images ont des orientations ou résolutions différentes
+- **Prévention des problèmes** : Évite les erreurs de points hors limites en normalisant les images dès le départ
+- **Pipeline robuste** : Le pipeline vérifie maintenant automatiquement la cohérence des images avant traitement
+
+## [3.2.2] - 2025-01-06
+### Corrections critiques
+- **Validation des coordonnées** : Correction majeure pour éviter les points homologues hors limites des images
+- **Filtrage automatique** : Les points avec des coordonnées négatives ou dépassant les dimensions des images sont automatiquement supprimés
+- **Validation dans le matcher** : Ajout d'une validation des coordonnées dans `core/matchers.py` pour éviter de générer des points problématiques dès le départ
+- **Validation dans l'export** : Amélioration de la validation dans `core/export.py` avec une validation par défaut même si les dimensions ne sont pas connues
+- **Compatibilité Micmac** : Cette correction résout l'erreur "POINT HOM OUT OF IMAGE" dans Micmac
+- **Format standard** : Correction du format des fichiers Homol pour respecter le standard Micmac (4 colonnes au lieu de 5)
+- **Gestion multi-résolutions** : Support correct des images avec différentes résolutions (3000x2250 et 2250x3000)
+
 ## [3.2.1] - 2025-07-10
 ### Corrections
 - Le dossier Homol est maintenant créé dans le même répertoire que les images source pour tous les modes (all, line, file et mulscale)

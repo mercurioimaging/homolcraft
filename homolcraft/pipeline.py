@@ -15,6 +15,9 @@ import concurrent.futures as cf
 import statistics as stats
 import time
 from functools import partial
+import subprocess
+import sys
+import os
 
 # Internes
 from .io import write_homol, read_pairs_xml, write_pairs_xml
@@ -66,6 +69,10 @@ def run(st: Settings) -> Dict[str, object]:
     log = log_section("Pipeline")
 
     imgs  = _find_images(st.pattern)
+    
+    # Vérifier et normaliser les images si nécessaire
+    _check_and_normalize_images(imgs)
+    
     pairs = _pairs_from_mode(imgs, st)
     log(f"{len(imgs)} images · {len(pairs)} paires → mode {st.mode.name}")
 
@@ -291,3 +298,80 @@ def _split(matches):
     for a, b in matches:
         (intra if Path(a).parent.name == Path(b).parent.name else inter).add((a, b))
     return intra, inter
+
+
+# ---------------------------------------------------------------------------
+# Vérification et normalisation des images
+# ---------------------------------------------------------------------------
+
+def _check_and_normalize_images(images: List[str]) -> None:
+    """Vérifie l'orientation et la résolution des images, normalise si nécessaire"""
+    from PIL import Image, ImageOps
+    
+    log = log_section("Vérification images")
+    
+    if not images:
+        return
+    
+    # Vérifier les dimensions et orientations
+    dimensions = []
+    orientations = []
+    needs_normalization = False
+    
+    for img_path in images:
+        try:
+            # Vérifier avec PIL pour l'orientation
+            pil_img = Image.open(img_path)
+            pil_img_oriented = ImageOps.exif_transpose(pil_img)
+            w, h = pil_img_oriented.size
+            dimensions.append((w, h))
+            
+            # Vérifier si l'image est en portrait après correction EXIF
+            if h > w:
+                orientations.append("portrait")
+                needs_normalization = True
+            else:
+                orientations.append("paysage")
+                
+        except Exception as e:
+            log(f"⚠️ Impossible de vérifier {img_path}: {e}")
+            continue
+    
+    if not dimensions:
+        log("⚠️ Aucune image vérifiée")
+        return
+    
+    # Vérifier la cohérence des dimensions
+    unique_dims = set(dimensions)
+    if len(unique_dims) > 1:
+        log(f"⚠️ Images avec résolutions différentes: {unique_dims}")
+        needs_normalization = True
+    
+    # Vérifier l'orientation
+    unique_orientations = set(orientations)
+    if len(unique_orientations) > 1 or "portrait" in orientations:
+        log(f"⚠️ Images avec orientations différentes: {unique_orientations}")
+        needs_normalization = True
+    
+    if needs_normalization:
+        log("🔄 Normalisation des images avec fix_orientation...")
+        try:
+            # Construire le pattern pour toutes les images
+            img_dir = os.path.dirname(images[0])
+            img_ext = os.path.splitext(images[0])[1]
+            pattern = os.path.join(img_dir, f"*{img_ext}")
+            
+            # Appeler fix_orientation
+            script_path = os.path.join(os.path.dirname(__file__), "..", "scripts", "fix_orientation.py")
+            result = subprocess.run([
+                sys.executable, script_path, pattern
+            ], capture_output=True, text=True, cwd=os.getcwd())
+            
+            if result.returncode == 0:
+                log("✅ Images normalisées avec succès")
+            else:
+                log(f"❌ Erreur lors de la normalisation: {result.stderr}")
+        except Exception as e:
+            log(f"❌ Erreur lors de l'appel à fix_orientation: {e}")
+    else:
+        log("✅ Images déjà normalisées")

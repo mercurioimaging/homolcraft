@@ -73,7 +73,11 @@ def get_matcher(*, name: str = "flann", nb_points: int = 750,
         for m in good:
             x1, y1 = kA[m.queryIdx].pt
             x2, y2 = kB[m.trainIdx].pt
-            pts.append((x1, y1, x2, y2, float(m.distance)))
+            
+            # Validation des coordonnées : éviter les valeurs négatives ou trop grandes
+            if (x1 >= 0 and y1 >= 0 and x2 >= 0 and y2 >= 0 and 
+                x1 < 10000 and y1 < 10000 and x2 < 10000 and y2 < 10000):
+                pts.append((x1, y1, x2, y2, float(m.distance)))
 
         pts.sort(key=lambda p: p[4])           # score ascendant
         return pts[:nb_points]

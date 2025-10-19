@@ -18,6 +18,11 @@ from functools import partial
 import subprocess
 import sys
 import os
+import re
+import fnmatch
+import hashlib
+import pickle
+import numpy as np
 
 # Internes
 from .io import write_homol, read_pairs_xml, write_pairs_xml
@@ -25,6 +30,7 @@ from .utils import log_section
 from .core.detectors import get_detector
 from .core.matchers import get_matcher
 from .core.export import filter_matches, export_micmac_homol, Point
+from .core import IMAGE_PROCESSING_INFO
 
 # ---------------------------------------------------------------------------
 # Paramètres publics
@@ -80,6 +86,9 @@ def run(st: Settings) -> Dict[str, object]:
     matcher = _factory_matcher(st)
 
     feats = _par_map(detect, imgs, st.n_jobs, "Detect")
+    
+    # Remplir IMAGE_PROCESSING_INFO avec les informations de traitement
+    _populate_processing_info(imgs, st)
 
     # ---------- matching ----------------------------------------------------
     log("Matching…")
@@ -122,10 +131,116 @@ def run(st: Settings) -> Dict[str, object]:
 # ---------------------------------------------------------------------------
 
 def _find_images(pattern: str) -> List[str]:
-    imgs = sorted(glob(pattern))
-    if not imgs:
-        raise FileNotFoundError(pattern)
-    return imgs
+    """
+    Trouve les images en utilisant glob ou regex selon le pattern.
+    Supporte les patterns glob classiques et les regex comme Tapioca.
+    """
+    # Détecter si c'est un pattern regex (contient des parenthèses avec |)
+    if '(' in pattern and '|' in pattern and ')' in pattern:
+        # Pattern regex détecté - utiliser regex comme Tapioca
+        return _find_images_regex(pattern)
+    else:
+        # Pattern glob classique
+        imgs = sorted(glob(pattern))
+        if not imgs:
+            raise FileNotFoundError(pattern)
+        return imgs
+
+def _get_cache_filename(image_path: str, st: Settings) -> str:
+    """
+    Génère un nom de fichier de cache basé sur l'image et les paramètres.
+    Format: sift_cache/{hash_params}_{basename}.pkl
+    """
+    # Créer un hash des paramètres de détection
+    params_str = f"{st.detect}_{st.size}_{st.clahe}_{st.sift_nfeat}"
+    params_hash = hashlib.md5(params_str.encode()).hexdigest()[:8]
+    
+    # Nom de base de l'image
+    basename = os.path.splitext(os.path.basename(image_path))[0]
+    
+    # Créer le cache dans le répertoire HomolCraft
+    homolcraft_dir = os.path.dirname(os.path.dirname(__file__))  # Remonte de homolcraft/pipeline.py vers HomolCraft/
+    cache_dir = os.path.join(homolcraft_dir, "sift_cache")
+    
+    return os.path.join(cache_dir, f"{params_hash}_{basename}.pkl")
+
+def _keypoints_to_serializable(keypoints):
+    """Convertit les keypoints OpenCV en format sérialisable."""
+    if not keypoints:
+        return []
+    return [(kp.pt[0], kp.pt[1], kp.angle, kp.response, kp.octave, kp.class_id) for kp in keypoints]
+
+def _keypoints_from_serializable(serialized_kpts):
+    """Reconstruit les keypoints OpenCV depuis le format sérialisé."""
+    if not serialized_kpts:
+        return []
+    import cv2
+    keypoints = []
+    for pt_x, pt_y, angle, response, octave, class_id in serialized_kpts:
+        kp = cv2.KeyPoint()
+        kp.pt = (pt_x, pt_y)
+        kp.angle = angle
+        kp.response = response
+        kp.octave = octave
+        kp.class_id = class_id
+        keypoints.append(kp)
+    return keypoints
+
+def _load_cached_features(cache_path: str) -> Tuple[List, np.ndarray]:
+    """Charge les features depuis le cache."""
+    try:
+        with open(cache_path, 'rb') as f:
+            serialized_kpts, descriptors = pickle.load(f)
+            keypoints = _keypoints_from_serializable(serialized_kpts)
+            return keypoints, descriptors
+    except (FileNotFoundError, pickle.PickleError, EOFError):
+        return None, None
+
+def _save_cached_features(cache_path: str, keypoints: List, descriptors: np.ndarray):
+    """Sauvegarde les features dans le cache."""
+    os.makedirs(os.path.dirname(cache_path), exist_ok=True)
+    try:
+        serialized_kpts = _keypoints_to_serializable(keypoints)
+        with open(cache_path, 'wb') as f:
+            pickle.dump((serialized_kpts, descriptors), f)
+    except Exception as e:
+        print(f"Warning: Impossible de sauvegarder le cache {cache_path}: {e}")
+
+def _find_images_regex(pattern: str) -> List[str]:
+    """
+    Trouve les images en utilisant des regex comme Tapioca.
+    Exemple: (glob_trav03_ori_|nord_trav03_ori_).*\\.(JPG|jpg)
+    """
+    # Extraire le répertoire de base du pattern
+    base_dir = os.path.dirname(pattern)
+    if not base_dir:
+        base_dir = "."
+    
+    # Extraire la partie regex du pattern
+    regex_part = os.path.basename(pattern)
+    
+    # Compiler la regex
+    try:
+        regex = re.compile(regex_part, re.IGNORECASE)
+    except re.error as e:
+        raise ValueError(f"Pattern regex invalide: {regex_part} - {e}")
+    
+    # Lister seulement les fichiers dans le répertoire de base (pas récursif)
+    matching_files = []
+    try:
+        for file in os.listdir(base_dir):
+            file_path = os.path.join(base_dir, file)
+            if os.path.isfile(file_path):
+                # Vérifier que le nom de fichier correspond à la regex
+                if regex.match(file):
+                    matching_files.append(file_path)
+    except OSError as e:
+        raise FileNotFoundError(f"Impossible de lire le répertoire {base_dir}: {e}")
+    
+    if not matching_files:
+        raise FileNotFoundError(f"Aucune image trouvée avec le pattern regex: {pattern}")
+    
+    return sorted(matching_files)
 
 
 def _pairs_from_mode(imgs: Sequence[str], st: Settings) -> List[Tuple[str, str]]:
@@ -160,8 +275,24 @@ def _pairs_from_mode(imgs: Sequence[str], st: Settings) -> List[Tuple[str, str]]
 
 def _factory_detector(st: Settings):
     sift_nf = st.sift_nfeat_low if st.mode is Mode.MULSCALE else st.sift_nfeat
-    return get_detector(name=st.detect, resize_max=st.size,
-                        clahe=st.clahe, sift_nfeatures=sift_nf)
+    base_detector = get_detector(name=st.detect, resize_max=st.size,
+                                clahe=st.clahe, sift_nfeatures=sift_nf)
+    
+    def _cached_detector(path: str):
+        """Détecteur avec cache SIFT."""
+        cache_path = _get_cache_filename(path, st)
+        
+        # Essayer de charger depuis le cache
+        cached_kpts, cached_desc = _load_cached_features(cache_path)
+        if cached_kpts is not None and cached_desc is not None:
+            return cached_kpts, cached_desc
+        
+        # Si pas de cache, calculer et sauvegarder
+        kpts, desc = base_detector(path)
+        _save_cached_features(cache_path, kpts, desc)
+        return kpts, desc
+    
+    return _cached_detector
 
 
 def _factory_matcher(st: Settings):
@@ -303,6 +434,30 @@ def _split(matches):
 # ---------------------------------------------------------------------------
 # Vérification et normalisation des images
 # ---------------------------------------------------------------------------
+
+def _populate_processing_info(images: List[str], st: Settings) -> None:
+    """Remplit IMAGE_PROCESSING_INFO avec les informations de traitement des images."""
+    from .core.io import read_image
+    
+    for img_path in images:
+        try:
+            # Lire l'image pour obtenir les informations de traitement
+            img_processed, original_shape, scale_factor = read_image(img_path, size=st.size, clahe=st.clahe)
+            
+            # Stocker les informations dans le dictionnaire global
+            IMAGE_PROCESSING_INFO[img_path] = {
+                "original_shape": original_shape,
+                "scale_factor": scale_factor,
+                "resized_shape": img_processed.shape[:2]  # (height, width)
+            }
+        except Exception as e:
+            print(f"Warning: Impossible de traiter l'image {img_path}: {e}")
+            # Valeurs par défaut en cas d'erreur
+            IMAGE_PROCESSING_INFO[img_path] = {
+                "original_shape": (1000, 1000),  # Valeurs par défaut
+                "scale_factor": 1.0,
+                "resized_shape": (1000, 1000)
+            }
 
 def _check_and_normalize_images(images: List[str]) -> None:
     """Vérifie l'orientation et la résolution des images, normalise si nécessaire"""

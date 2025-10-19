@@ -104,7 +104,7 @@ def _write_one(path: str, pts: List[Point],
                     valid_pt2 = True
             
             if valid_pt1 and valid_pt2:
-                f.write(f"{x1_orig:.6f} {y1_orig:.6f} {x2_orig:.6f} {y2_orig:.6f}\n")
+                f.write(f"{x1_orig:.3f} {y1_orig:.3f} {x2_orig:.3f} {y2_orig:.3f}\n")
 
 
 # ---------------------------------------------------------------------------

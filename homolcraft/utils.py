@@ -121,6 +121,9 @@ def write_run_log(
     thresh_factor=None,
     thresh_fixed=None,
     sift_nfeat_low=None,
+    pattern2=None,
+    size_pattern2=None,
+    sift_nfeat_pattern2=None,
 ):
     """Append un résumé d'exécution dans *homolcraft_run_log.txt*."""
     log_file = "homolcraft_run_log.txt"
@@ -143,6 +146,14 @@ def write_run_log(
         f"  - nb_pts_mini: {nb_pts_mini}",
         f"  - n_jobs: {n_jobs}",
     ]
+    
+    # Ajouter pattern2 si spécifié
+    if pattern2 is not None:
+        lines.append(f"  - pattern2: {pattern2}")
+    
+    # Ajouter size_pattern2 si spécifié
+    if size_pattern2 is not None:
+        lines.append(f"  - size_pattern2: {size_pattern2}")
     
     # Ajouter delta et circ seulement s'ils sont spécifiés (utile pour le mode line)
     if delta is not None:

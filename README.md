@@ -13,6 +13,8 @@ Fournir un outil Python permettant de générer des points homologues pour la ph
     - **MulScale** : Approche multirésolution.
     - **File** : Calcul sur des paires listées dans un fichier.
     - **Pattern/Custom** : Modes avancés ou personnalisés.
+    - **Pattern2** : Matching croisé entre deux patterns distincts (option `--pattern2`). Crée uniquement des paires entre les images des deux groupes, sans paires intra-groupe.
+    - **Résolutions différentes** : Support de `--size-pattern2` pour détecter les points SIFT à des résolutions différentes pour chaque pattern (ex: détails RTI à 500px, images d'orientation à 2000px).
 - Détecteurs : SIFT (OpenCV/Kornia), LoFTR (PyTorch/Kornia), extensible
 - Multirésolution, gestion fine des paires, export texte Micmac
 - Parallélisation, logs détaillés, dry-run, CLI moderne
@@ -44,6 +46,11 @@ homolcraft line "data/IMG_*.tif" --size 1500 --delta 3
 homolcraft mulscale "data/IMG_*.tif" --size-low 500 --size 2000 --nb-min-pt 5
 homolcraft file "data/pairs.xml" --size 2000
 homolcraft all "data/IMG_*.tif" --detect loftr --size 2000
+homolcraft all "mur_*" --pattern2 "toit_*" --size 1500
+homolcraft mulscale "ortho_*" --pattern2 "sud*ori*" --size 2000
+# Matching avec résolutions différentes (RTI détails + images d'orientation)
+homolcraft mulscale "nord_trav*_ori*.JPG" --pattern2 "rti_nord*.jpg" \
+    --size 2000 --size-pattern2 500 --sift-nfeat 4000 --sift-nfeat-low 2000
 ```
 
 ## Structure du projet

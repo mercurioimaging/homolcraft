@@ -12,7 +12,7 @@ def common_opts(fn):
     """Injecte toutes les options communes en une seule fois."""
     opts = dict(
         size=1500, detect="sift", clahe=True, sift_nfeat=4000,
-        nb_points=750, nb_pts_min=30, n_jobs=8,
+        nb_points=750, nb_pts_min=30, n_jobs=8, size_pattern2=None,
     )
     for k, default in reversed(list(opts.items())):
         fn = click.option(f"--{k.replace('_','-')}", default=default)(fn)
@@ -52,8 +52,10 @@ def _launch(mode: Mode, **kw):
 @cli.command()
 @common_opts
 @click.argument("pattern")
-def all(pattern, **kw):
-    _launch(Mode.ALL, pattern=pattern, **kw)
+@click.option("--pattern2", default=None, type=str, help="Second pattern pour matching croisé")
+@click.option("--sift-nfeat-pattern2", default=None, type=int, help="Nombre de features SIFT pour pattern2")
+def all(pattern, pattern2, sift_nfeat_pattern2, **kw):
+    _launch(Mode.ALL, pattern=pattern, pattern2=pattern2, sift_nfeat_pattern2=sift_nfeat_pattern2, **kw)
 
 @cli.command()
 @common_opts
@@ -73,6 +75,7 @@ def file(pattern, xml_path, **kw):
 @cli.command()
 @common_opts
 @click.argument("pattern")
+@click.option("--pattern2", default=None, type=str, help="Second pattern pour matching croisé")
 @click.option("--xml-path", type=click.Path(), default=None)
 @click.option("--thresh-strategy",
               type=click.Choice(["auto", "mean", "median", "fixed"]),
@@ -81,7 +84,7 @@ def file(pattern, xml_path, **kw):
 @click.option("--thresh-fixed", default=50, type=int)
 @click.option("--sift-nfeat-low", default=500, type=int, 
               help="Nombre de points SIFT à détecter pour la passe rapide (la passe haute résolution utilisera --sift-nfeat)")
-def mulscale(pattern, **kw):
+def mulscale(pattern, pattern2, **kw):
     """
     Traitement en deux passes (rapide puis précise) pour optimiser le calcul des points homologues.
     
@@ -93,4 +96,4 @@ def mulscale(pattern, **kw):
     # Convertir xml_path en Path si présent
     if kw.get('xml_path'):
         kw['xml_path'] = Path(kw['xml_path'])
-    _launch(Mode.MULSCALE, pattern=pattern, **kw)
+    _launch(Mode.MULSCALE, pattern=pattern, pattern2=pattern2, **kw)

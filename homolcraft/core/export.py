@@ -13,9 +13,54 @@ import os
 from typing import List, Tuple, Dict, DefaultDict
 from collections import defaultdict
 from homolcraft.core import IMAGE_PROCESSING_INFO # Import du dictionnaire global depuis homolcraft.core
+from PIL import Image, ImageOps
 
 Point = Tuple[float, float, float, float, float]  # (x1, y1, x2, y2, score)
 OccMap = Dict[Tuple[str, int, int], int]          # (img, x, y) -> count
+
+
+def _get_image_orientation_transform(image_path: str) -> Tuple[int, int, int]:
+    """
+    Détermine la transformation d'orientation nécessaire pour une image.
+    Retourne (width, height, orientation_code) de l'image après correction EXIF.
+    orientation_code: 1=normal, 3=180°, 6=90°CW, 8=90°CCW
+    """
+    # Pour l'instant, retourner des valeurs par défaut pour éviter la lenteur
+    # Les images sont déjà orientées correctement par HomolCraft lors de la lecture
+    return 4000, 6000, 1  # Valeurs par défaut pour les images ori
+
+
+def _reproject_point_to_final_orientation(x: float, y: float, 
+                                         original_w: int, original_h: int,
+                                         final_w: int, final_h: int,
+                                         orientation: int) -> Tuple[float, float]:
+    """
+    Reprojette un point de l'image redimensionnée vers l'orientation finale.
+    """
+    # Les points sont détectés sur l'image redimensionnée et orientée
+    # Il faut les reprojeter dans l'orientation finale
+    
+    # Si l'image a été pivotée (orientation 6 ou 8), il faut ajuster les coordonnées
+    if orientation == 6:  # 90° CW
+        # L'image a été pivotée de 90° dans le sens horaire
+        # Les coordonnées (x,y) sur l'image pivotée correspondent à (y, w-x) sur l'image originale
+        x_final = y
+        y_final = original_w - x
+    elif orientation == 8:  # 90° CCW  
+        # L'image a été pivotée de 90° dans le sens anti-horaire
+        # Les coordonnées (x,y) sur l'image pivotée correspondent à (h-y, x) sur l'image originale
+        x_final = original_h - y
+        y_final = x
+    elif orientation == 3:  # 180°
+        # L'image a été pivotée de 180°
+        x_final = original_w - x
+        y_final = original_h - y
+    else:  # orientation == 1 (normal)
+        # Pas de rotation, coordonnées inchangées
+        x_final = x
+        y_final = y
+    
+    return x_final, y_final
 
 
 # ---------------------------------------------------------------------------
@@ -53,6 +98,7 @@ def export_micmac_homol(base_dir: str,
         
         scale2 = info2["scale_factor"]
         orig_shape2_wh = (info2["original_shape"][1], info2["original_shape"][0])
+        
 
     _write_one(os.path.join(d1, f"{img2_name}.txt"), points, 
                scale1, orig_shape1_wh, 
@@ -63,7 +109,7 @@ def export_micmac_homol(base_dir: str,
     sym_points = [(x2, y2, x1, y1, s) for x1, y1, x2, y2, s in points]
     _write_one(os.path.join(d2, f"{img1_name}.txt"), sym_points,
                scale2, orig_shape2_wh,  # scale pour les premiers points (originellement x2,y2)
-               scale1, orig_shape1_wh)  # scale pour les seconds points (originellement x1,y1)
+               scale1, orig_shape1_wh)   # scale pour les seconds points (originellement x1,y1)
 
 
 def _write_one(path: str, pts: List[Point], 
@@ -79,27 +125,40 @@ def _write_one(path: str, pts: List[Point],
             y1_orig = y1_res / sc1 if sc1 != 0 else y1_res
             x2_orig = x2_res / sc2 if sc2 != 0 else x2_res
             y2_orig = y2_res / sc2 if sc2 != 0 else y2_res
+            
 
-            # Vérification des limites des points dans les images originales
+            # Les images sont déjà correctement orientées par HomolCraft lors de la lecture
+            # Pas besoin de reprojection supplémentaire
+
+            # DEBUG: Afficher les dimensions pour diagnostiquer
+            if shape1_wh is None or shape2_wh is None:
+                print(f"DEBUG: shape1_wh={shape1_wh}, shape2_wh={shape2_wh}")
+                print(f"DEBUG: Point problématique: ({x1_orig:.2f}, {y1_orig:.2f}) -> ({x2_orig:.2f}, {y2_orig:.2f})")
+            
+            # Vérification des limites des points dans les images finales
             # 0 ≤ x < largeur et 0 ≤ y < hauteur
             valid_pt1 = False
             valid_pt2 = False
             
             if shape1_wh: # shape1_wh is (width, height)
+                # Validation : point doit être dans les dimensions de l'image
                 if (0 <= x1_orig < shape1_wh[0] and 0 <= y1_orig < shape1_wh[1]):
                     valid_pt1 = True
+                else:
+                    print(f"DEBUG: Point 1 rejeté: ({x1_orig:.2f}, {y1_orig:.2f}) limites: {shape1_wh} (width={shape1_wh[0]}, height={shape1_wh[1]})")
             else:
                 # Si les dimensions ne sont pas connues, on applique une validation par défaut
-                # basée sur des limites raisonnables (éviter les valeurs négatives et trop grandes)
                 if (0 <= x1_orig < 10000 and 0 <= y1_orig < 10000):
                     valid_pt1 = True
             
             if shape2_wh: # shape2_wh is (width, height)
+                # Validation : point doit être dans les dimensions de l'image
                 if (0 <= x2_orig < shape2_wh[0] and 0 <= y2_orig < shape2_wh[1]):
                     valid_pt2 = True
+                else:
+                    print(f"DEBUG: Point 2 rejeté: ({x2_orig:.2f}, {y2_orig:.2f}) limites: {shape2_wh} (width={shape2_wh[0]}, height={shape2_wh[1]})")
             else:
                 # Si les dimensions ne sont pas connues, on applique une validation par défaut
-                # basée sur des limites raisonnables (éviter les valeurs négatives et trop grandes)
                 if (0 <= x2_orig < 10000 and 0 <= y2_orig < 10000):
                     valid_pt2 = True
             

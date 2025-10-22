@@ -64,6 +64,10 @@ class Settings:
     thresh_factor: float = 0.5
     thresh_fixed: int    = 50
     sift_nfeat_low: int  = 1000
+    # pattern2
+    pattern2: str | None = None
+    size_pattern2: int | None = None  # Si None, utilise size pour les deux patterns
+    sift_nfeat_pattern2: int | None = None  # Si None, utilise sift_nfeat pour les deux patterns
 
 
 # ---------------------------------------------------------------------------
@@ -76,30 +80,73 @@ def run(st: Settings) -> Dict[str, object]:
 
     imgs  = _find_images(st.pattern)
     
+    # Si pattern2 est défini, fusionner les deux listes d'images pour la détection
+    if st.pattern2 is not None:
+        imgs2 = _find_images(st.pattern2)
+        all_imgs = imgs + imgs2
+        log(f"Pattern1: {len(imgs)} images, Pattern2: {len(imgs2)} images")
+    else:
+        all_imgs = imgs
+    
     # Vérifier et normaliser les images si nécessaire
-    _check_and_normalize_images(imgs)
+    # DÉSACTIVÉ : La normalisation modifie les fichiers originaux et n'est pas nécessaire
+    # car read_image() gère déjà l'EXIF avec exif_transpose et le scale_factor
+    # _check_and_normalize_images(all_imgs)
     
     pairs = _pairs_from_mode(imgs, st)
-    log(f"{len(imgs)} images · {len(pairs)} paires → mode {st.mode.name}")
+    log(f"{len(all_imgs)} images · {len(pairs)} paires → mode {st.mode.name}")
 
-    detect  = _factory_detector(st)
+    # Détection avec résolutions différentes si pattern2 et size_pattern2 sont définis
+    if st.pattern2 is not None and st.size_pattern2 is not None:
+        # Créer des détecteurs avec résolutions différentes
+        detect1 = _factory_detector(st)  # Pour pattern1
+        st_pattern2 = Settings(**{**st.__dict__, "size": st.size_pattern2})
+        # Si sift_nfeat_pattern2 est défini, l'utiliser pour pattern2
+        if st.sift_nfeat_pattern2 is not None:
+            st_pattern2 = Settings(**{**st_pattern2.__dict__, "sift_nfeat": st.sift_nfeat_pattern2})
+        detect2 = _factory_detector(st_pattern2)  # Pour pattern2
+        log(f"Résolutions : pattern1={st.size}px, pattern2={st.size_pattern2}px")
+        
+        # Détecter séparément
+        feats1 = _par_map(detect1, imgs, st.n_jobs, "Detect pattern1")
+        feats2 = _par_map(detect2, imgs2, st.n_jobs, "Detect pattern2")
+        feats = {**feats1, **feats2}
+    else:
+        # Comportement classique
+        detect = _factory_detector(st)
+        feats = _par_map(detect, all_imgs, st.n_jobs, "Detect")
+    
     matcher = _factory_matcher(st)
-
-    feats = _par_map(detect, imgs, st.n_jobs, "Detect")
     
     # Remplir IMAGE_PROCESSING_INFO avec les informations de traitement
-    _populate_processing_info(imgs, st)
+    if st.pattern2 is not None and st.size_pattern2 is not None:
+        # Utiliser les bonnes tailles pour chaque pattern
+        _populate_processing_info_patterns(imgs, imgs2, st)
+    else:
+        _populate_processing_info(all_imgs, st)
 
     # ---------- matching ----------------------------------------------------
     log("Matching…")
-    match_dict: Dict[Tuple[str, str], List[Point]] = {
-        pair: pts for pair, pts in
-        _par_map(lambda ab: matcher(
-            Path(ab[0]), Path(ab[1]), feats[ab[0]], feats[ab[1]]
-        ), pairs, st.n_jobs, "Match").items()
-        if pts
-    }
-    log(f"Pairs matchées : {len(match_dict)}")
+    match_results = _par_map(lambda ab: matcher(
+        Path(ab[0]), Path(ab[1]), feats[ab[0]], feats[ab[1]]
+    ), pairs, st.n_jobs, "Match")
+    
+    # Affichage détaillé des résultats
+    total_pairs = len(pairs)
+    matched_pairs = 0
+    total_points = 0
+    
+    match_dict: Dict[Tuple[str, str], List[Point]] = {}
+    for (img1, img2), pts in match_results.items():
+        if pts:
+            match_dict[(img1, img2)] = pts
+            matched_pairs += 1
+            total_points += len(pts)
+            log(f"  ✓ {Path(img1).name} ↔ {Path(img2).name}: {len(pts)} points")
+        else:
+            log(f"  ✗ {Path(img1).name} ↔ {Path(img2).name}: 0 points")
+    
+    log(f"Résultat matching: {matched_pairs}/{total_pairs} paires, {total_points} points total")
 
     # ---------- mulscale première passe (brute) -----------------------------
     if st.mode is Mode.MULSCALE:
@@ -245,7 +292,14 @@ def _find_images_regex(pattern: str) -> List[str]:
 
 def _pairs_from_mode(imgs: Sequence[str], st: Settings) -> List[Tuple[str, str]]:
     if st.mode in {Mode.ALL, Mode.MULSCALE}:
-        return [(a, b) for a, b in combinations(imgs, 2)]
+        # Si pattern2 est défini, créer des paires croisées entre les deux groupes
+        if st.pattern2 is not None:
+            imgs1 = imgs  # Premier groupe d'images
+            imgs2 = _find_images(st.pattern2)  # Deuxième groupe d'images
+            return [(img1, img2) for img1 in imgs1 for img2 in imgs2]
+        else:
+            # Comportement classique : toutes les combinaisons possibles
+            return [(a, b) for a, b in combinations(imgs, 2)]
 
     if st.mode is Mode.LINE:
         n = len(imgs)
@@ -296,8 +350,12 @@ def _factory_detector(st: Settings):
 
 
 def _factory_matcher(st: Settings):
-    return get_matcher(name="flann" if st.detect == "sift" else "loftr",
-                       nb_points=st.nb_points)
+    # Utiliser FLANN pour tous les détecteurs classiques (SIFT, AKAZE, ORB)
+    if st.detect in ["sift", "akaze", "orb"]:
+        return get_matcher(name="flann", nb_points=st.nb_points)
+    else:
+        # Pour LoFTR et autres détecteurs avancés
+        return get_matcher(name="loftr", nb_points=st.nb_points)
 
 
 # ---------------------------------------------------------------------------
@@ -455,6 +513,44 @@ def _populate_processing_info(images: List[str], st: Settings) -> None:
             # Valeurs par défaut en cas d'erreur
             IMAGE_PROCESSING_INFO[img_path] = {
                 "original_shape": (1000, 1000),  # Valeurs par défaut
+                "scale_factor": 1.0,
+                "resized_shape": (1000, 1000)
+            }
+
+def _populate_processing_info_patterns(imgs1: List[str], imgs2: List[str], st: Settings) -> None:
+    """Remplit IMAGE_PROCESSING_INFO avec les bonnes tailles pour pattern1 et pattern2."""
+    from .core.io import read_image
+    
+    # Traiter les images du pattern1 avec st.size
+    for img_path in imgs1:
+        try:
+            img_processed, original_shape, scale_factor = read_image(img_path, size=st.size, clahe=st.clahe)
+            IMAGE_PROCESSING_INFO[img_path] = {
+                "original_shape": original_shape,
+                "scale_factor": scale_factor,
+                "resized_shape": img_processed.shape[:2]
+            }
+        except Exception as e:
+            print(f"Warning: Impossible de traiter l'image {img_path}: {e}")
+            IMAGE_PROCESSING_INFO[img_path] = {
+                "original_shape": (1000, 1000),
+                "scale_factor": 1.0,
+                "resized_shape": (1000, 1000)
+            }
+    
+    # Traiter les images du pattern2 avec st.size_pattern2
+    for img_path in imgs2:
+        try:
+            img_processed, original_shape, scale_factor = read_image(img_path, size=st.size_pattern2, clahe=st.clahe)
+            IMAGE_PROCESSING_INFO[img_path] = {
+                "original_shape": original_shape,
+                "scale_factor": scale_factor,
+                "resized_shape": img_processed.shape[:2]
+            }
+        except Exception as e:
+            print(f"Warning: Impossible de traiter l'image {img_path}: {e}")
+            IMAGE_PROCESSING_INFO[img_path] = {
+                "original_shape": (1000, 1000),
                 "scale_factor": 1.0,
                 "resized_shape": (1000, 1000)
             }

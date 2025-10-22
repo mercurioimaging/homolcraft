@@ -29,16 +29,65 @@ class SIFTDetector:
         return self.detector.detectAndCompute(gray, None)
 
 
+class AKAZEDetector:
+    def __init__(self, max_keypoints: int = 2000, threshold: float = 0.001):
+        self.detector = cv2.AKAZE_create(threshold=threshold)
+        self.max_keypoints = max_keypoints
+
+    def detect_and_compute(self, gray: np.ndarray):
+        kps, desc = self.detector.detectAndCompute(gray, None)
+        if kps is not None and len(kps) > self.max_keypoints:
+            # Trie par réponse et ne garde que les meilleurs
+            idx = np.argsort([-kp.response for kp in kps])[:self.max_keypoints]
+            kps = [kps[i] for i in idx]
+            desc = desc[idx]
+        return kps, desc
+
+
+class ORBDetector:
+    def __init__(self, nfeatures: int = 10000):
+        self.detector = cv2.ORB_create(nfeatures=nfeatures)
+
+    def detect_and_compute(self, gray: np.ndarray):
+        return self.detector.detectAndCompute(gray, None)
+
+
 class LoFTRDetector:
-    """Présent pour référence ; non intégrée au pipeline DRY."""
-    def __init__(self, device: str = "cpu"):
+    """Détecteur LoFTR pour matching deep learning."""
+    def __init__(self, device: str = "cpu", weights: str = "outdoor"):
         from kornia.feature import LoFTR
         import torch
-        self.matcher = LoFTR(pretrained="outdoor").to(device)
+        self.loftr = LoFTR(pretrained=weights).to(device)
         self.device = device
 
-    # API différente ; pas utilisée ici
-    # def detect_and_compute(self, image0, image1): ...
+    def detect_and_compute(self, gray: np.ndarray):
+        """LoFTR ne fait pas de détection séparée, retourne None pour compatibilité."""
+        return None, None
+
+    def match_images(self, img1: np.ndarray, img2: np.ndarray):
+        """Matching direct entre deux images avec LoFTR."""
+        import torch
+        
+        # Conversion en tenseur torch, normalisé [0,1], batché, float32
+        if isinstance(img1, np.ndarray):
+            img1 = torch.from_numpy(img1).float() / 255.0
+        if isinstance(img2, np.ndarray):
+            img2 = torch.from_numpy(img2).float() / 255.0
+        if img1.ndim == 2:
+            img1 = img1.unsqueeze(0)
+        if img2.ndim == 2:
+            img2 = img2.unsqueeze(0)
+        if img1.ndim == 3:
+            img1 = img1.unsqueeze(0)
+        if img2.ndim == 3:
+            img2 = img2.unsqueeze(0)
+        
+        inp = {'image0': img1, 'image1': img2}
+        with torch.no_grad():
+            out = self.loftr(inp)
+        mkpts0 = out['keypoints0'].cpu().numpy()
+        mkpts1 = out['keypoints1'].cpu().numpy()
+        return mkpts0, mkpts1
 
 
 # ---------------------------------------------------------------------------
@@ -83,6 +132,35 @@ def get_detector(
             gray = _preprocess(path, resize_max, clahe)
             kpts, desc = sift.detect_and_compute(gray)
             return kpts, desc
+
+        return _detect
+
+    elif name == "akaze":
+        akaze = AKAZEDetector(max_keypoints=sift_nfeatures)
+
+        def _detect(path: str | Path):
+            gray = _preprocess(path, resize_max, clahe)
+            kpts, desc = akaze.detect_and_compute(gray)
+            return kpts, desc
+
+        return _detect
+
+    elif name == "orb":
+        orb = ORBDetector(nfeatures=sift_nfeatures)
+
+        def _detect(path: str | Path):
+            gray = _preprocess(path, resize_max, clahe)
+            kpts, desc = orb.detect_and_compute(gray)
+            return kpts, desc
+
+        return _detect
+
+    elif name == "loftr":
+        loftr = LoFTRDetector()
+
+        def _detect(path: str | Path):
+            # LoFTR ne fait pas de détection séparée
+            return None, None
 
         return _detect
 

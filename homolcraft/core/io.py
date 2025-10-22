@@ -38,6 +38,8 @@ def read_image(path, size=None, clahe=False):
     img_to_process = img_bgr.copy() # Travailler sur une copie pour éviter des side effects
 
     if size is not None:
+        # S'assurer que size est un entier
+        size = int(size)
         # Utiliser h_orig, w_orig (logiques) pour calculer le scale_factor
         scale_factor = size / max(h_orig, w_orig)
         # Redimensionner en utilisant les dimensions logiques multipliées par le scale_factor

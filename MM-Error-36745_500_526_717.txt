@@ -1,6 +1,0 @@
-Exit with code 1 
-Generated from line 202  of file /Users/eloi/Desktop/MICMAC/Code/micmac/src/util/error.cpp 
-PID=36745
-Context=[cEliseFatalErrorHandler::cEFEH_OnErreur]
-GMEC:mes=Ori name is not a valid existing directory line=4048 file=/Users/eloi/Desktop/MICMAC/Code/micmac/src/photogram/ChantierNameAssoc.cpp
-MM3D-Command=["mm3d" "Tapas" "Fraser" "(.*(ori|depth).*JPG|rti_nord.*jpg)" "InOri=OriDepthOrthoRtiNord" "InCal=OriDepthOrthoRtiNord" "Out=OriDepthOrthoRtiNordFinal" "ExpTxt=1" ]

@@ -171,17 +171,31 @@ def _write_one(path: str, pts: List[Point],
 # ---------------------------------------------------------------------------
 
 def _spatial_sample(points: List[Point], max_pts: int,
-                    grid: int = 4) -> List[Point]:
-    """Répartit les points dans une grille *grid×grid* côté image A."""
+                    grid: int = 4,
+                    img_w: float | None = None,
+                    img_h: float | None = None) -> List[Point]:
+    """Répartit les points dans une grille *grid×grid* côté image A.
+
+    Reçoit TOUS les points matchés (pas de pré-filtrage par score global).
+    Dans chaque cellule, les points sont triés par score Lowe (ascendant =
+    meilleur en premier), puis on pioche en round-robin entre cellules.
+
+    img_w / img_h : dimensions réelles de l'image A. Si non fournis, on se
+    rabat sur le max des coordonnées matchées.
+    """
     bins: DefaultDict[Tuple[int, int], List[Point]] = defaultdict(list)
 
-    w = max(max(p[0], p[2]) for p in points)
-    h = max(max(p[1], p[3]) for p in points)
+    w = img_w if img_w is not None else max(p[0] for p in points)
+    h = img_h if img_h is not None else max(p[1] for p in points)
 
     for p in points:
-        col = int(p[0] / (w + 1e-6) * grid)
-        row = int(p[1] / (h + 1e-6) * grid)
+        col = min(int(p[0] / (w + 1e-6) * grid), grid - 1)
+        row = min(int(p[1] / (h + 1e-6) * grid), grid - 1)
         bins[(col, row)].append(p)
+
+    # Trier chaque cellule par score (meilleur = plus petit score Lowe)
+    for cell in bins:
+        bins[cell].sort(key=lambda p: p[4])
 
     selected: List[Point] = []
     cells = [(c, r) if r % 2 == 0 else (grid - 1 - c, r)
@@ -212,26 +226,21 @@ def _popularity_key(p: Point, img1: str, img2: str, occ: OccMap) -> float:
 def filter_matches(points: List[Point], *,
                    max_pts: int = 750,
                    min_pts: int = 30,
-                   occurrences: OccMap | None = None) -> List[Point]:
+                   occurrences: OccMap | None = None,
+                   img_w: float | None = None,
+                   img_h: float | None = None) -> List[Point]:
     """
-    1. Trie par (score Lowe / popularité) si `occurrences` fourni,
-       sinon par score Lowe.
-    2. Découpe un petit buffer (×2) pour le sampling spatial.
-    3. Échantillonnage spatial 4×4.
-    4. Renvoie [] si < min_pts, sinon au plus max_pts points.
+    Échantillonnage spatial 4×4 sur TOUS les points matchés.
+    Le tri par score se fait à l'intérieur de chaque cellule, pas globalement,
+    pour éviter que les zones texturées monopolisent le budget.
     """
     if len(points) < min_pts:
         return []
 
-    if occurrences is None:
-        points_sorted = sorted(points, key=lambda p: p[4])
-    else:
-        # On a besoin du nom de l'image A/B pour la popularité ; on les
-        # passera plus tard via `functools.partial`.
+    if occurrences is not None:
         raise RuntimeError("filter_matches doit être partiellement appliquée "
                            "avec les noms d'image quand occurrences est fourni.")
 
-    pts_buf = points_sorted[: max_pts * 2]          # buffer
-    pts_final = _spatial_sample(pts_buf, max_pts)
+    pts_final = _spatial_sample(points, max_pts, img_w=img_w, img_h=img_h)
 
     return pts_final if len(pts_final) >= min_pts else []

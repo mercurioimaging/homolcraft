@@ -51,6 +51,7 @@ class Settings:
     size: int | None   = 1500
     clahe: bool        = True
     sift_nfeat: int    = 10000
+    sift_grid: int     = 4
     nb_points: int     = 750
     nb_pts_min: int    = 30
     n_jobs: int        = 8
@@ -64,6 +65,7 @@ class Settings:
     thresh_factor: float = 0.5
     thresh_fixed: int    = 50
     sift_nfeat_low: int  = 1000
+    size_low: int | None = None  # Si None, utilise size pour la passe rapide
     # pattern2
     pattern2: str | None = None
     size_pattern2: int | None = None  # Si None, utilise size pour les deux patterns
@@ -198,8 +200,10 @@ def _get_cache_filename(image_path: str, st: Settings) -> str:
     Génère un nom de fichier de cache basé sur l'image et les paramètres.
     Format: sift_cache/{hash_params}_{basename}.pkl
     """
-    # Créer un hash des paramètres de détection
-    params_str = f"{st.detect}_{st.size}_{st.clahe}_{st.sift_nfeat}"
+    # Pour mulscale, le cache utilise les mêmes paramètres que le détecteur (taille/nfeat passe rapide)
+    effective_size = (st.size_low if st.size_low is not None else st.size) if st.mode is Mode.MULSCALE else st.size
+    effective_nfeat = st.sift_nfeat_low if st.mode is Mode.MULSCALE else st.sift_nfeat
+    params_str = f"{st.detect}_{effective_size}_{st.clahe}_{effective_nfeat}_{st.sift_grid}"
     params_hash = hashlib.md5(params_str.encode()).hexdigest()[:8]
     
     # Nom de base de l'image
@@ -329,8 +333,10 @@ def _pairs_from_mode(imgs: Sequence[str], st: Settings) -> List[Tuple[str, str]]
 
 def _factory_detector(st: Settings):
     sift_nf = st.sift_nfeat_low if st.mode is Mode.MULSCALE else st.sift_nfeat
-    base_detector = get_detector(name=st.detect, resize_max=st.size,
-                                clahe=st.clahe, sift_nfeatures=sift_nf)
+    resize_max = (st.size_low if st.size_low is not None else st.size) if st.mode is Mode.MULSCALE else st.size
+    base_detector = get_detector(name=st.detect, resize_max=resize_max,
+                                clahe=st.clahe, sift_nfeatures=sift_nf,
+                                sift_grid=st.sift_grid)
     
     def _cached_detector(path: str):
         """Détecteur avec cache SIFT."""
@@ -402,13 +408,17 @@ def _export(matches: Dict[Tuple[str, str], List[Point]],
     out_dir.mkdir(exist_ok=True)
 
     kept, total_pts = 0, 0
-    for (path_a, path_b), pts in matches.items(): # path_a, path_b sont les chemins complets
-        # on prépare une version partielle de filter_matches avec les infos d'images
-        # Note: filter_matches utilise les noms d'image, pas les chemins, pour OccMap.
-        # Cela devrait être cohérent avec la façon dont OccMap est construit.
-        # Si OccMap est indexé par les noms de base, alors Path(path_a).name est correct.
+    for (path_a, path_b), pts in matches.items():
+        info_a = IMAGE_PROCESSING_INFO.get(path_a, {})
+        info_b = IMAGE_PROCESSING_INFO.get(path_b, {})
+        orig_a = info_a.get("original_shape")  # (h, w)
+        orig_b = info_b.get("original_shape")
+        img_w = float(orig_a[1]) if orig_a else None
+        img_h = float(orig_a[0]) if orig_a else None
+
         fm = partial(_filter_with_occ, img1=Path(path_a).name, img2=Path(path_b).name, occ=occ,
-                     max_pts=st.nb_points, min_pts=st.nb_pts_min)
+                     max_pts=st.nb_points, min_pts=st.nb_pts_min,
+                     img_w=img_w, img_h=img_h)
         pts_sel = fm(pts)
         if not pts_sel:
             continue
@@ -430,22 +440,27 @@ def _export(matches: Dict[Tuple[str, str], List[Point]],
 
 def _filter_with_occ(points: List[Point], *,
                       img1: str, img2: str, occ,
-                      max_pts: int, min_pts: int):
-    # on réutilise filter_matches mais en lui donnant une clé de tri custom
-    pts_sorted = sorted(
-        points,
-        key=lambda p: (p[4] / max(
-            occ.get((img1, round(p[0]), round(p[1])), 1),
-            occ.get((img2, round(p[2]), round(p[3])), 1)
-        ))
-    )
-    pts_buf = pts_sorted[: max_pts * 2]
-    # on appelle la version "occurrences=None" pour utiliser sampling
+                      max_pts: int, min_pts: int,
+                      img_w: float | None = None,
+                      img_h: float | None = None):
+    # Pondérer le score par la popularité (points vus dans beaucoup de paires
+    # sont plus fiables) — on stocke le score pondéré dans p[4] pour que
+    # _spatial_sample trie correctement à l'intérieur de chaque cellule.
+    pts_weighted = [
+        (x1, y1, x2, y2,
+         score / max(
+             occ.get((img1, round(x1), round(y1)), 1),
+             occ.get((img2, round(x2), round(y2)), 1)
+         ))
+        for x1, y1, x2, y2, score in points
+    ]
     return filter_matches(
-        pts_buf,
+        pts_weighted,
         max_pts=max_pts,
         min_pts=min_pts,
-        occurrences=None  # déjà triés par popularité
+        occurrences=None,
+        img_w=img_w,
+        img_h=img_h,
     )
 
 

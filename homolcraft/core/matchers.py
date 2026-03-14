@@ -27,6 +27,16 @@ def _match_sift(desc1, desc2, ratio: float = 0.75):
     return [m for m, n in matches if m.distance < ratio * n.distance]
 
 
+def _match_flann(desc1, desc2, ratio: float = 0.75):
+    FLANN_INDEX_KDTREE = 1
+    flann = cv2.FlannBasedMatcher(
+        {"algorithm": FLANN_INDEX_KDTREE, "trees": 5},
+        {"checks": 50},
+    )
+    matches = flann.knnMatch(desc1.astype(np.float32), desc2.astype(np.float32), k=2)
+    return [m for m, n in matches if m.distance < ratio * n.distance]
+
+
 # ---------------------------------------------------------------------------
 # Factory pour le pipeline ---------------------------------------------------
 # ---------------------------------------------------------------------------
@@ -163,7 +173,7 @@ def get_matcher(*, name: str = "flann", nb_points: int = 750,
                 return []
 
             # 1) Lowe ratio-test
-            good = _match_sift(dA, dB)
+            good = _match_flann(dA, dB) if name == "flann" else _match_sift(dA, dB)
             if len(good) < 8:                       # homographie < 4, essentielle < 5
                 return []
 

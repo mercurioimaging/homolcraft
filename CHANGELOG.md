@@ -1,5 +1,9 @@
 # Changelog HomolCraft
 
+## [3.2.4] - 2025-03-14
+### Corrections
+- **[mulscale]** Ajout de l'option `--size-low` (taille max en px pour la passe rapide) ; auparavant documentée dans le README mais absente de la CLI
+
 ## [3.2.3] - 2025-01-06
 ### Améliorations majeures
 - **Normalisation automatique des images** : Vérification et normalisation automatique de l'orientation et de la résolution des images avant traitement

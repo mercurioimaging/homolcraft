@@ -1,0 +1,6 @@
+Exit with code 1 
+Generated from line 202  of file /Users/eloi/Desktop/MICMAC/Code/micmac/src/util/error.cpp 
+PID=39763
+Context=[cEliseFatalErrorHandler::cEFEH_OnErreur]
+GMEC:mes=Name is not a correct homologue prefix line=4217 file=/Users/eloi/Desktop/MICMAC/Code/micmac/src/photogram/ChantierNameAssoc.cpp
+MM3D-Command=["mm3d" "Tapas" "Fraser" ".*JPG" "Out=Calib" "ExpTxt=1" ]

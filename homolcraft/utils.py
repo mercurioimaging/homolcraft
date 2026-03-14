@@ -121,6 +121,7 @@ def write_run_log(
     thresh_factor=None,
     thresh_fixed=None,
     sift_nfeat_low=None,
+    size_low=None,
     pattern2=None,
     size_pattern2=None,
     sift_nfeat_pattern2=None,
@@ -171,6 +172,8 @@ def write_run_log(
             lines.append(f"  - thresh_fixed: {thresh_fixed}")
         if sift_nfeat_low is not None:
             lines.append(f"  - sift_nfeat_low: {sift_nfeat_low}")
+        if size_low is not None:
+            lines.append(f"  - size_low: {size_low}")
 
     # Ajout des stats
     lines.append("Stats:")

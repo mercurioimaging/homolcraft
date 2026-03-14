@@ -1,3 +1,3 @@
 =================================================================
-"mm3d" "Tapas" "Fraser" "(.*(ori|depth).*JPG|rti_nord.*jpg)" "InOri=OriDepthOrthoRtiNord" "InCal=OriDepthOrthoRtiNord" "Out=OriDepthOrthoRtiNordFinal" "ExpTxt=1" 
- PID : 36745 ;   [Beginning at ] Wed Oct 22 09:01:39 2025
+"mm3d" "Tapas" "Fraser" ".*JPG" "Out=Calib" "ExpTxt=1" 
+ PID : 39763 ;   [Beginning at ] Thu Mar 12 16:13:11 2026

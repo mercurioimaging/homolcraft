@@ -29,6 +29,50 @@ class SIFTDetector:
         return self.detector.detectAndCompute(gray, None)
 
 
+class GridSIFTDetector:
+    """Détection SIFT par tuiles : force K features dans chaque cellule NxM,
+    y compris les zones à faible texture où SIFT global ne détecte rien."""
+
+    def __init__(self, nfeatures_total: int = 10000, grid: int = 4):
+        self.grid = grid
+        self.nfeatures_per_cell = max(1, nfeatures_total // (grid * grid))
+
+    def detect_and_compute(self, gray: np.ndarray):
+        h, w = gray.shape[:2]
+        cell_h = h // self.grid
+        cell_w = w // self.grid
+
+        all_kps: List[cv2.KeyPoint] = []
+        all_descs: List[np.ndarray] = []
+
+        sift = cv2.SIFT_create(nfeatures=self.nfeatures_per_cell)
+
+        for row in range(self.grid):
+            for col in range(self.grid):
+                y0 = row * cell_h
+                x0 = col * cell_w
+                y1 = h if row == self.grid - 1 else y0 + cell_h
+                x1 = w if col == self.grid - 1 else x0 + cell_w
+
+                tile = gray[y0:y1, x0:x1]
+                kps, descs = sift.detectAndCompute(tile, None)
+                if kps is None or len(kps) == 0:
+                    continue
+
+                # Recaler les coordonnées dans l'image complète
+                for kp in kps:
+                    kp.pt = (kp.pt[0] + x0, kp.pt[1] + y0)
+
+                all_kps.extend(kps)
+                if descs is not None:
+                    all_descs.append(descs)
+
+        if not all_kps:
+            return [], None
+
+        return all_kps, np.vstack(all_descs) if all_descs else None
+
+
 class AKAZEDetector:
     def __init__(self, max_keypoints: int = 2000, threshold: float = 0.001):
         self.detector = cv2.AKAZE_create(threshold=threshold)
@@ -118,19 +162,27 @@ def get_detector(
     resize_max: int | None = 1500,
     clahe: bool = True,
     sift_nfeatures: int = 4_000,
+    sift_grid: int = 4,
 ):
     """
     Retourne une fonction ``detect(path) -> (keypoints, descriptors)``
     conforme aux attentes du pipeline.
+
+    sift_grid : taille de la grille NxN pour la détection par tuiles (défaut 4).
+                Mettre à 1 pour revenir au comportement global (pas de grille).
     """
     name = name.lower()
 
     if name == "sift":
-        sift = SIFTDetector(nfeatures=sift_nfeatures)
+        detector = (
+            GridSIFTDetector(nfeatures_total=sift_nfeatures, grid=sift_grid)
+            if sift_grid > 1
+            else SIFTDetector(nfeatures=sift_nfeatures)
+        )
 
         def _detect(path: str | Path):
             gray = _preprocess(path, resize_max, clahe)
-            kpts, desc = sift.detect_and_compute(gray)
+            kpts, desc = detector.detect_and_compute(gray)
             return kpts, desc
 
         return _detect

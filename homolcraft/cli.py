@@ -45,6 +45,8 @@ def _launch(mode: Mode, **kw):
             log_params['thresh_fixed'] = st.thresh_fixed
         if 'sift_nfeat_low' not in log_params:
             log_params['sift_nfeat_low'] = st.sift_nfeat_low
+        if 'size_low' not in log_params:
+            log_params['size_low'] = st.size_low
     write_run_log(stats=stats, algo_version=ALGO_VERSION, mode=mode.name.lower(), **log_params)
     click.echo(f"\n✓ Terminé : {stats}")
 
@@ -84,6 +86,8 @@ def file(pattern, xml_path, **kw):
 @click.option("--thresh-fixed", default=50, type=int)
 @click.option("--sift-nfeat-low", default=500, type=int, 
               help="Nombre de points SIFT à détecter pour la passe rapide (la passe haute résolution utilisera --sift-nfeat)")
+@click.option("--size-low", default=None, type=int,
+              help="Taille max (px) pour la passe rapide ; par défaut = --size")
 def mulscale(pattern, pattern2, **kw):
     """
     Traitement en deux passes (rapide puis précise) pour optimiser le calcul des points homologues.

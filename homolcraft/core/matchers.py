@@ -112,6 +112,7 @@ def get_matcher(*, name: str = "flann", nb_points: int = 750,
                 xfeat_max_kpts: int = 8192,
                 xfeat_ransac_thresh: float = 5.0,
                 min_disp: float = 0.0, dedup: bool = False,
+                lowe_ratio: float = 0.75, ransac_model: str = "homography",
                 stats: dict | None = None):
     """
     Retourne une fonction :
@@ -335,7 +336,8 @@ def get_matcher(*, name: str = "flann", nb_points: int = 750,
                 return []
 
             # 1) Lowe ratio-test
-            good = _match_flann(dA, dB) if name == "flann" else _match_sift(dA, dB)
+            good = (_match_flann(dA, dB, lowe_ratio) if name == "flann"
+                    else _match_sift(dA, dB, lowe_ratio))
             # 1b) Points fixes (même position image) et doublons : AVANT RANSAC,
             #     sinon un fond immobile (H = identité) capte le consensus.
             if min_disp > 0 and good:
@@ -356,8 +358,11 @@ def get_matcher(*, name: str = "flann", nb_points: int = 750,
             if use_ransac and len(good) >= 8:
                 ptsA = np.float32([kA[m.queryIdx].pt for m in good])
                 ptsB = np.float32([kB[m.trainIdx].pt for m in good])
-                H, mask = cv2.findHomography(ptsA, ptsB, cv2.RANSAC, ransac_thresh)
-                if H is None:
+                if ransac_model == "fundamental":
+                    H, mask = cv2.findFundamentalMat(ptsA, ptsB, cv2.FM_RANSAC, ransac_thresh, 0.999)
+                else:
+                    H, mask = cv2.findHomography(ptsA, ptsB, cv2.RANSAC, ransac_thresh)
+                if H is None or mask is None:
                     return []
                 inliers = mask.ravel() == 1
                 good = [m for m, keep in zip(good, inliers) if keep]

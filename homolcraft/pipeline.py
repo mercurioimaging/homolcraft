@@ -27,7 +27,7 @@ import numpy as np
 # Internes
 from .io import write_homol, read_pairs_xml, write_pairs_xml
 from .utils import log_section
-from .core.detectors import get_detector
+from .core.detectors import get_detector, masq_path
 from .core.matchers import get_matcher, is_vismatch_model
 from .core.export import filter_matches, export_micmac_homol, Point
 from .core import IMAGE_PROCESSING_INFO
@@ -63,6 +63,7 @@ class Settings:
     # mulscale
     min_disp: float      = 0.0    # px pleine résolution ; 0 = désactivé
     dedup: bool          = False
+    use_masq: bool       = False  # SIFT seulement dans <image>_Masq.tif (à côté de l'image)
     thresh_strategy: str = "auto"
     thresh_factor: float = 0.5
     thresh_fixed: int    = 50
@@ -73,6 +74,7 @@ class Settings:
     xfeat_ransac_thresh: float = 5.0
     ransac_thresh: float = 6.0
     lowe_ratio: float = 0.75
+    ransac_model: str = "homography"   # homography | fundamental
     # pattern2
     pattern2: str | None = None
     size_pattern2: int | None = None  # Si None, utilise size pour les deux patterns
@@ -239,6 +241,9 @@ def _get_cache_filename(image_path: str, st: Settings) -> str:
     effective_size = (st.size_low if st.size_low is not None else st.size) if st.mode is Mode.MULSCALE else st.size
     effective_nfeat = st.sift_nfeat_low if st.mode is Mode.MULSCALE else st.sift_nfeat
     params_str = f"{st.detect}_{effective_size}_{st.clahe}_{effective_nfeat}_{st.sift_grid}"
+    if st.use_masq:                                  # le masque change les points : sa date et sa taille entrent dans la clé
+        mp = masq_path(image_path)
+        params_str += f"_masq{os.stat(mp).st_mtime_ns}_{os.stat(mp).st_size}" if mp.exists() else "_masqNone"
     params_hash = hashlib.md5(params_str.encode()).hexdigest()[:8]
     
     # Nom de base de l'image
@@ -371,7 +376,7 @@ def _factory_detector(st: Settings):
     resize_max = (st.size_low if st.size_low is not None else st.size) if st.mode is Mode.MULSCALE else st.size
     base_detector = get_detector(name=st.detect, resize_max=resize_max,
                                 clahe=st.clahe, sift_nfeatures=sift_nf,
-                                sift_grid=st.sift_grid)
+                                sift_grid=st.sift_grid, use_masq=st.use_masq)
     
     def _cached_detector(path: str):
         """Détecteur avec cache SIFT."""
@@ -394,7 +399,9 @@ def _factory_matcher(st: Settings, stats: dict | None = None):
     # Utiliser FLANN pour tous les détecteurs classiques (SIFT, AKAZE, ORB)
     if st.detect in ["sift", "akaze", "orb"]:
         return get_matcher(name="flann", nb_points=st.nb_points,
-                           min_disp=st.min_disp, dedup=st.dedup, stats=stats)
+                           min_disp=st.min_disp, dedup=st.dedup, stats=stats,
+                           lowe_ratio=st.lowe_ratio, ransac_thresh=st.ransac_thresh,
+                           ransac_model=st.ransac_model)
     size_a = (st.size_low if st.size_low is not None else st.size) if st.mode is Mode.MULSCALE else st.size
     size_b = st.size_pattern2 if st.size_pattern2 is not None else size_a
     return get_matcher(

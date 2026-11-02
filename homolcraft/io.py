@@ -32,13 +32,25 @@ def _write_one(out_dir: Path, src: str, dst: str,
 # ------------------------------------------------------------------
 def read_pairs_xml(path: str | Path) -> List[Tuple[str, str]]:
     tree = ET.parse(str(path))
-    return [tuple(c.text.split()) for c in tree.findall("Cple")]
+    pairs: List[Tuple[str, str]] = []
+    for c in tree.findall("Cple"):
+        i1 = c.find("I1")
+        i2 = c.find("I2")
+        if i1 is not None and i2 is not None and i1.text and i2.text:
+            pairs.append((i1.text, i2.text))
+            continue
+        parts = (c.text or "").split()
+        if len(parts) == 2:
+            pairs.append((parts[0], parts[1]))
+    return pairs
 
 def write_pairs_xml(path: str | Path,
                     pairs: Sequence[Tuple[str, str]]) -> None:
     import xml.dom.minidom as md
     root = ET.Element("SauvegardeNamedRel")
     for a, b in pairs:
-        ET.SubElement(root, "Cple").text = f"{a} {b}"
+        cple = ET.SubElement(root, "Cple")
+        ET.SubElement(cple, "I1").text = a
+        ET.SubElement(cple, "I2").text = b
     path = Path(path)
     path.write_text(md.parseString(ET.tostring(root)).toprettyxml("  "))

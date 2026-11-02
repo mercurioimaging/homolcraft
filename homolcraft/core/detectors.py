@@ -15,6 +15,7 @@ import cv2
 import numpy as np
 
 from .io import read_image   # même dossier « core »
+from .matchers import is_vismatch_model as _is_vismatch
 from homolcraft.core import IMAGE_PROCESSING_INFO # Import du dictionnaire depuis homolcraft.core
 
 # ---------------------------------------------------------------------------
@@ -25,8 +26,8 @@ class SIFTDetector:
     def __init__(self, nfeatures: int = 0):
         self.detector = cv2.SIFT_create(nfeatures=nfeatures)
 
-    def detect_and_compute(self, gray: np.ndarray):
-        return self.detector.detectAndCompute(gray, None)
+    def detect_and_compute(self, gray: np.ndarray, mask: np.ndarray | None = None):
+        return self.detector.detectAndCompute(gray, mask)
 
 
 class GridSIFTDetector:
@@ -37,7 +38,15 @@ class GridSIFTDetector:
         self.grid = grid
         self.nfeatures_per_cell = max(1, nfeatures_total // (grid * grid))
 
-    def detect_and_compute(self, gray: np.ndarray):
+    def detect_and_compute(self, gray: np.ndarray, mask: np.ndarray | None = None):
+        ox = oy = 0
+        if mask is not None:                       # grille calée sur l'emprise du masque (les cellules hors masque ne gaspillent pas de points)
+            ys, xs = np.nonzero(mask)
+            if len(xs) == 0:
+                return [], None
+            oy, ox = int(ys.min()), int(xs.min())
+            gray = gray[oy:ys.max() + 1, ox:xs.max() + 1]
+            mask = mask[oy:ys.max() + 1, ox:xs.max() + 1]
         h, w = gray.shape[:2]
         cell_h = h // self.grid
         cell_w = w // self.grid
@@ -55,13 +64,13 @@ class GridSIFTDetector:
                 x1 = w if col == self.grid - 1 else x0 + cell_w
 
                 tile = gray[y0:y1, x0:x1]
-                kps, descs = sift.detectAndCompute(tile, None)
+                kps, descs = sift.detectAndCompute(tile, None if mask is None else mask[y0:y1, x0:x1])
                 if kps is None or len(kps) == 0:
                     continue
 
                 # Recaler les coordonnées dans l'image complète
                 for kp in kps:
-                    kp.pt = (kp.pt[0] + x0, kp.pt[1] + y0)
+                    kp.pt = (kp.pt[0] + x0 + ox, kp.pt[1] + y0 + oy)
 
                 all_kps.extend(kps)
                 if descs is not None:
@@ -152,6 +161,22 @@ def _preprocess(path: str | Path, resize_max: int | None, clahe: bool):
     return gray
 
 
+def masq_path(path: str | Path) -> Path:
+    """Masque MicMac d'une image : <image>_Masq.tif à côté de l'image (255 = zone où détecter)."""
+    p = Path(path)
+    return p.with_name(p.stem + "_Masq.tif")
+
+
+def load_masq(path: str | Path, shape) -> np.ndarray | None:
+    """Masque de l'image ramené à la taille de travail (h, w) de `shape` ; None (avec avertissement) s'il manque."""
+    mp = masq_path(path)
+    m = cv2.imread(str(mp), cv2.IMREAD_GRAYSCALE) if mp.exists() else None
+    if m is None:
+        print(f"Warning: masque {mp.name} introuvable, image non masquée")
+        return None
+    return (cv2.resize(m, (shape[1], shape[0]), interpolation=cv2.INTER_NEAREST) > 127).astype(np.uint8) * 255
+
+
 # ---------------------------------------------------------------------------
 # Factory publique ----------------------------------------------------------
 # ---------------------------------------------------------------------------
@@ -163,6 +188,7 @@ def get_detector(
     clahe: bool = True,
     sift_nfeatures: int = 4_000,
     sift_grid: int = 4,
+    use_masq: bool = False,
 ):
     """
     Retourne une fonction ``detect(path) -> (keypoints, descriptors)``
@@ -182,7 +208,8 @@ def get_detector(
 
         def _detect(path: str | Path):
             gray = _preprocess(path, resize_max, clahe)
-            kpts, desc = detector.detect_and_compute(gray)
+            mask = load_masq(path, gray.shape) if use_masq else None
+            kpts, desc = detector.detect_and_compute(gray, mask)
             return kpts, desc
 
         return _detect
@@ -207,11 +234,9 @@ def get_detector(
 
         return _detect
 
-    elif name == "loftr":
-        loftr = LoFTRDetector()
-
+    elif name == "loftr" or _is_vismatch(name):
+        # Matching direct (vismatch / LoFTR) : pas de détection séparée
         def _detect(path: str | Path):
-            # LoFTR ne fait pas de détection séparée
             return None, None
 
         return _detect

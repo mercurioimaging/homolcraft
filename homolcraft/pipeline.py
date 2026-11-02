@@ -241,6 +241,13 @@ def _get_cache_filename(image_path: str, st: Settings) -> str:
     effective_size = (st.size_low if st.size_low is not None else st.size) if st.mode is Mode.MULSCALE else st.size
     effective_nfeat = st.sift_nfeat_low if st.mode is Mode.MULSCALE else st.sift_nfeat
     params_str = f"{st.detect}_{effective_size}_{st.clahe}_{effective_nfeat}_{st.sift_grid}"
+    # l'image elle-même entre dans la clé (chemin absolu, taille, date) : deux reliures aux photos de même nom (ant_Oblique_IMG_001.jpg) ne
+    # doivent pas partager leurs points (cache SIFT nommé sans chemin : JOURNAL.md 3.10 ; reliure 49 appariée avec les points de la 181)
+    try:
+        stt = os.stat(image_path)
+        params_str += f"_{os.path.abspath(image_path)}_{stt.st_size}_{stt.st_mtime_ns}"
+    except OSError:
+        params_str += f"_{os.path.abspath(image_path)}"
     if st.use_masq:                                  # le masque change les points : sa date et sa taille entrent dans la clé
         mp = masq_path(image_path)
         params_str += f"_masq{os.stat(mp).st_mtime_ns}_{os.stat(mp).st_size}" if mp.exists() else "_masqNone"

@@ -125,6 +125,8 @@ def write_run_log(
     pattern2=None,
     size_pattern2=None,
     sift_nfeat_pattern2=None,
+    min_disp=0.0,
+    dedup=False,
 ):
     """Append un résumé d'exécution dans *homolcraft_run_log.txt*."""
     log_file = "homolcraft_run_log.txt"
@@ -146,6 +148,8 @@ def write_run_log(
         f"  - nb_points: {nb_points}",
         f"  - nb_pts_mini: {nb_pts_mini}",
         f"  - n_jobs: {n_jobs}",
+        f"  - min_disp: {min_disp}",
+        f"  - dedup: {dedup}",
     ]
     
     # Ajouter pattern2 si spécifié

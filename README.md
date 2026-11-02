@@ -86,4 +86,11 @@ MIT
 - [ ] Modes MulScale/File
 - [ ] Parallélisation
 - [ ] Packaging binaire
-- [ ] Optimisations, tests, documentation 
+- [ ] Optimisations, tests, documentation
+
+## Points fixes (plateau tournant)
+```bash
+homolcraft line "data/IMG_*.jpg" --size 2000 --nb-points 500 --min-disp 3 --dedup
+```
+- `--min-disp FLOAT` : ignore les matchs dont le déplacement (px pleine résolution) est < valeur (fond/table immobiles). 0 = désactivé. Appliqué avant RANSAC et avant `--nb-points`.
+- `--dedup/--no-dedup` : un point d'une image n'est utilisé qu'une fois par paire.

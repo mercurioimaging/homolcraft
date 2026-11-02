@@ -13,9 +13,15 @@ def common_opts(fn):
     opts = dict(
         size=1500, detect="sift", clahe=True, sift_nfeat=4000,
         nb_points=750, nb_pts_min=30, n_jobs=8, size_pattern2=None,
+        xfeat_max_kpts=8192, xfeat_ransac_thresh=5.0,
     )
     for k, default in reversed(list(opts.items())):
         fn = click.option(f"--{k.replace('_','-')}", default=default)(fn)
+    fn = click.option("--dedup/--no-dedup", default=False,
+                      help="Un point image n'est utilisé qu'une fois par paire (meilleur match gardé)")(fn)
+    fn = click.option("--min-disp", default=0.0, type=float,
+                      help="Supprime les matchs dont le déplacement (px pleine résolution) est < min-disp "
+                           "(points fixes : fond, table). 0 = désactivé ; usage : 3.0. Appliqué avant RANSAC et --nb-points")(fn)
     return fn
 
 @click.group()
@@ -35,6 +41,8 @@ def _launch(mode: Mode, **kw):
     # Supprimer xml_path des paramètres de log pour le mode mulscale
     if mode == Mode.MULSCALE and 'xml_path' in log_params:
         log_params.pop('xml_path')
+    for _k in ('xfeat_max_kpts', 'xfeat_ransac_thresh'):
+        log_params.pop(_k, None)
     # S'assurer que les paramètres spécifiques au mulscale sont présents
     if mode == Mode.MULSCALE:
         if 'thresh_strategy' not in log_params:

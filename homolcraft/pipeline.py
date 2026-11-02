@@ -28,7 +28,7 @@ import numpy as np
 from .io import write_homol, read_pairs_xml, write_pairs_xml
 from .utils import log_section
 from .core.detectors import get_detector
-from .core.matchers import get_matcher
+from .core.matchers import get_matcher, is_vismatch_model
 from .core.export import filter_matches, export_micmac_homol, Point
 from .core import IMAGE_PROCESSING_INFO
 
@@ -61,11 +61,18 @@ class Settings:
     # file / mulscale
     xml_path: Path | None = None
     # mulscale
+    min_disp: float      = 0.0    # px pleine résolution ; 0 = désactivé
+    dedup: bool          = False
     thresh_strategy: str = "auto"
     thresh_factor: float = 0.5
     thresh_fixed: int    = 50
     sift_nfeat_low: int  = 1000
     size_low: int | None = None  # Si None, utilise size pour la passe rapide
+    # xfeat
+    xfeat_max_kpts: int    = 8192
+    xfeat_ransac_thresh: float = 5.0
+    ransac_thresh: float = 6.0
+    lowe_ratio: float = 0.75
     # pattern2
     pattern2: str | None = None
     size_pattern2: int | None = None  # Si None, utilise size pour les deux patterns
@@ -76,9 +83,19 @@ class Settings:
 # Run
 # ---------------------------------------------------------------------------
 
+def _effective_n_jobs(st: Settings) -> int:
+    """Modèles deep learning : inférence séquentielle (MPS/CUDA non thread-safe)."""
+    if st.detect == "loftr" or is_vismatch_model(st.detect):
+        return 1
+    return st.n_jobs
+
+
 def run(st: Settings) -> Dict[str, object]:
     tic = time.time()
     log = log_section("Pipeline")
+    n_jobs = _effective_n_jobs(st)
+    if n_jobs != st.n_jobs:
+        log(f"⚠︎ n_jobs={st.n_jobs} → 1 (modèle {st.detect}, inférence non parallélisable)")
 
     imgs  = _find_images(st.pattern)
     
@@ -110,15 +127,16 @@ def run(st: Settings) -> Dict[str, object]:
         log(f"Résolutions : pattern1={st.size}px, pattern2={st.size_pattern2}px")
         
         # Détecter séparément
-        feats1 = _par_map(detect1, imgs, st.n_jobs, "Detect pattern1")
-        feats2 = _par_map(detect2, imgs2, st.n_jobs, "Detect pattern2")
+        feats1 = _par_map(detect1, imgs, n_jobs, "Detect pattern1")
+        feats2 = _par_map(detect2, imgs2, n_jobs, "Detect pattern2")
         feats = {**feats1, **feats2}
     else:
         # Comportement classique
         detect = _factory_detector(st)
-        feats = _par_map(detect, all_imgs, st.n_jobs, "Detect")
+        feats = _par_map(detect, all_imgs, n_jobs, "Detect")
     
-    matcher = _factory_matcher(st)
+    fixed_stats: Dict[Tuple[str, str], Dict[str, int]] = {}
+    matcher = _factory_matcher(st, fixed_stats)
     
     # Remplir IMAGE_PROCESSING_INFO avec les informations de traitement
     if st.pattern2 is not None and st.size_pattern2 is not None:
@@ -131,24 +149,37 @@ def run(st: Settings) -> Dict[str, object]:
     log("Matching…")
     match_results = _par_map(lambda ab: matcher(
         Path(ab[0]), Path(ab[1]), feats[ab[0]], feats[ab[1]]
-    ), pairs, st.n_jobs, "Match")
+    ), pairs, n_jobs, "Match")
     
     # Affichage détaillé des résultats
     total_pairs = len(pairs)
     matched_pairs = 0
     total_points = 0
     
+    def _fx(a, b):
+        d = fixed_stats.get((str(a), str(b)))
+        if not d:
+            return ""
+        return f" [fixes supprimés: {d['fixed']}, doublons: {d['dup']}]"
+
     match_dict: Dict[Tuple[str, str], List[Point]] = {}
     for (img1, img2), pts in match_results.items():
         if pts:
             match_dict[(img1, img2)] = pts
             matched_pairs += 1
             total_points += len(pts)
-            log(f"  ✓ {Path(img1).name} ↔ {Path(img2).name}: {len(pts)} points")
+            log(f"  ✓ {Path(img1).name} ↔ {Path(img2).name}: {len(pts)} points{_fx(img1, img2)}")
         else:
-            log(f"  ✗ {Path(img1).name} ↔ {Path(img2).name}: 0 points")
+            log(f"  ✗ {Path(img1).name} ↔ {Path(img2).name}: 0 points{_fx(img1, img2)}")
     
     log(f"Résultat matching: {matched_pairs}/{total_pairs} paires, {total_points} points total")
+    n_fixed = sum(d["fixed"] for d in fixed_stats.values())
+    n_dup = sum(d["dup"] for d in fixed_stats.values())
+    if st.min_disp > 0:
+        log(f"Points fixes supprimés (déplacement < {st.min_disp} px pleine résolution): "
+            f"{n_fixed} au total, sur {sum(1 for d in fixed_stats.values() if d['fixed'])}/{total_pairs} paires")
+    if st.dedup:
+        log(f"Doublons supprimés (--dedup): {n_dup} au total")
 
     # ---------- mulscale première passe (brute) -----------------------------
     if st.mode is Mode.MULSCALE:
@@ -172,6 +203,10 @@ def run(st: Settings) -> Dict[str, object]:
     occ = _compute_occurrences(match_dict)  # popularité globale
     export_stats = _export(match_dict, st, occ)
     export_stats["elapsed"] = time.time() - tic
+    if st.min_disp > 0:
+        export_stats["fixed_points_removed"] = n_fixed
+    if st.dedup:
+        export_stats["duplicates_removed"] = n_dup
     return export_stats
 
 
@@ -355,13 +390,22 @@ def _factory_detector(st: Settings):
     return _cached_detector
 
 
-def _factory_matcher(st: Settings):
+def _factory_matcher(st: Settings, stats: dict | None = None):
     # Utiliser FLANN pour tous les détecteurs classiques (SIFT, AKAZE, ORB)
     if st.detect in ["sift", "akaze", "orb"]:
-        return get_matcher(name="flann", nb_points=st.nb_points)
-    else:
-        # Pour LoFTR et autres détecteurs avancés
-        return get_matcher(name="loftr", nb_points=st.nb_points)
+        return get_matcher(name="flann", nb_points=st.nb_points,
+                           min_disp=st.min_disp, dedup=st.dedup, stats=stats)
+    size_a = (st.size_low if st.size_low is not None else st.size) if st.mode is Mode.MULSCALE else st.size
+    size_b = st.size_pattern2 if st.size_pattern2 is not None else size_a
+    return get_matcher(
+        name=st.detect,
+        nb_points=st.nb_points,
+        resize_max_a=size_a,
+        resize_max_b=size_b,
+        xfeat_max_kpts=st.xfeat_max_kpts,
+        xfeat_ransac_thresh=st.xfeat_ransac_thresh,
+        min_disp=st.min_disp, dedup=st.dedup, stats=stats,
+    )
 
 
 # ---------------------------------------------------------------------------

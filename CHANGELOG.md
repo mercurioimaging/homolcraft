@@ -1,5 +1,11 @@
 # Changelog HomolCraft
 
+## [Non publié]
+### Ajouts
+- **`--min-disp FLOAT`** (all, line, mulscale, file ; défaut 0 = désactivé) : supprime les matchs dont le déplacement entre les deux images (px pleine résolution) est < min-disp. Cible les points fixes (fond, table) d'une série sur plateau tournant. Appliqué avant RANSAC et avant `--nb-points` / `--nb-pts-min`. Valeur conseillée : 3.0
+- **`--dedup/--no-dedup`** (défaut off) : un point image n'est utilisé qu'une fois par paire (meilleur match gardé)
+- Log : nombre de points fixes / doublons supprimés, par paire et au total
+
 ## [3.2.4] - 2025-03-14
 ### Corrections
 - **[mulscale]** Ajout de l'option `--size-low` (taille max en px pour la passe rapide) ; auparavant documentée dans le README mais absente de la CLI

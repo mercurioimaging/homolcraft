@@ -94,3 +94,6 @@ homolcraft line "data/IMG_*.jpg" --size 2000 --nb-points 500 --min-disp 3 --dedu
 ```
 - `--min-disp FLOAT` : ignore les matchs dont le déplacement (px pleine résolution) est < valeur (fond/table immobiles). 0 = désactivé. Appliqué avant RANSAC et avant `--nb-points`.
 - `--dedup/--no-dedup` : un point d'une image n'est utilisé qu'une fois par paire.
+
+## Cache SIFT
+- `--cache/--no-cache` (défaut `--cache`) : `--no-cache` désactive totalement le cache disque `sift_cache/` (ni lecture, ni écriture, dossier non créé). Exemple : `homolcraft all "data/IMG_*.jpg" --detect sift --no-cache`.

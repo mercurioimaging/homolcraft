@@ -26,6 +26,8 @@ def common_opts(fn):
     fn = click.option("--min-disp", default=0.0, type=float,
                       help="Supprime les matchs dont le déplacement (px pleine résolution) est < min-disp "
                            "(points fixes : fond, table). 0 = désactivé ; usage : 3.0. Appliqué avant RANSAC et --nb-points")(fn)
+    fn = click.option("--cache/--no-cache", "use_cache", default=True,
+                      help="Cache SIFT disque (sift_cache/). --no-cache : ni lecture, ni écriture, dossier non créé")(fn)
     fn = click.option("--use-masq/--no-use-masq", default=False,
                       help="SIFT ne détecte que dans <image>_Masq.tif (masque MicMac, à côté de l'image ; 255 = zone utile). Sans effet pour LoFTR")(fn)
     return fn
@@ -47,7 +49,7 @@ def _launch(mode: Mode, **kw):
     # Supprimer xml_path des paramètres de log pour le mode mulscale
     if mode == Mode.MULSCALE and 'xml_path' in log_params:
         log_params.pop('xml_path')
-    for _k in ('use_masq', 'xfeat_max_kpts', 'xfeat_ransac_thresh', 'dust3r_conf', 'dust3r_refine', 'lowe_ratio', 'ransac_thresh', 'ransac_model'):
+    for _k in ('use_masq', 'use_cache', 'xfeat_max_kpts', 'xfeat_ransac_thresh', 'dust3r_conf', 'dust3r_refine', 'lowe_ratio', 'ransac_thresh', 'ransac_model'):
         log_params.pop(_k, None)
     # S'assurer que les paramètres spécifiques au mulscale sont présents
     if mode == Mode.MULSCALE:

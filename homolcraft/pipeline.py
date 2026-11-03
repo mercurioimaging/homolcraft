@@ -64,6 +64,7 @@ class Settings:
     min_disp: float      = 0.0    # px pleine résolution ; 0 = désactivé
     dedup: bool          = False
     use_masq: bool       = False  # SIFT seulement dans <image>_Masq.tif (à côté de l'image)
+    use_cache: bool      = True   # False : ni lecture ni écriture de sift_cache/ (dossier non créé)
     thresh_strategy: str = "auto"
     thresh_factor: float = 0.5
     thresh_fixed: int    = 50
@@ -386,7 +387,10 @@ def _factory_detector(st: Settings):
     base_detector = get_detector(name=st.detect, resize_max=resize_max,
                                 clahe=st.clahe, sift_nfeatures=sift_nf,
                                 sift_grid=st.sift_grid, use_masq=st.use_masq)
-    
+    if not st.use_cache:
+        # --no-cache : détecteur brut, aucune lecture ni écriture de sift_cache/
+        return base_detector
+
     def _cached_detector(path: str):
         """Détecteur avec cache SIFT."""
         cache_path = _get_cache_filename(path, st)

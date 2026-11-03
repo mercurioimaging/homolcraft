@@ -72,6 +72,7 @@ class Settings:
     # xfeat
     xfeat_max_kpts: int    = 8192
     xfeat_ransac_thresh: float = 5.0
+    dust3r_conf: float = 1.5
     ransac_thresh: float = 6.0
     lowe_ratio: float = 0.75
     ransac_model: str = "homography"   # homography | fundamental
@@ -418,6 +419,7 @@ def _factory_matcher(st: Settings, stats: dict | None = None):
         resize_max_b=size_b,
         xfeat_max_kpts=st.xfeat_max_kpts,
         xfeat_ransac_thresh=st.xfeat_ransac_thresh,
+        dust3r_conf=st.dust3r_conf, ransac_thresh=st.ransac_thresh,
         min_disp=st.min_disp, dedup=st.dedup, stats=stats,
     )
 

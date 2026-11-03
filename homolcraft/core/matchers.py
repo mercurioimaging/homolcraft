@@ -20,7 +20,7 @@ try:
 except ImportError:
     _VISMATCH_MODELS = []
 
-_VISMATCH_ALIASES = {"xfeat": "xfeat-star"}
+_VISMATCH_ALIASES = {"xfeat": "xfeat-star", "dust3r": "duster", "mast3r": "master"}
 _VISMATCH_CACHE: dict[str, object] = {}
 _VISMATCH_LOCK = threading.Lock()
 _VISMATCH_INFER_LOCK = threading.Lock()
@@ -111,6 +111,7 @@ def get_matcher(*, name: str = "flann", nb_points: int = 750,
                 device: str | None = None,
                 xfeat_max_kpts: int = 8192,
                 xfeat_ransac_thresh: float = 5.0,
+                dust3r_conf: float = 1.5,
                 min_disp: float = 0.0, dedup: bool = False,
                 lowe_ratio: float = 0.75, ransac_model: str = "homography",
                 stats: dict | None = None):
@@ -168,19 +169,24 @@ def get_matcher(*, name: str = "flann", nb_points: int = 750,
             t_read = time.time() - t0
             _log(f"{tag}: matching ({w1}×{h1} / {w2}×{h2})…")
 
-            cache_key = f"{model_name}:{device}:{xfeat_max_kpts}:{xfeat_ransac_thresh}"
+            cache_key = f"{model_name}:{device}:{xfeat_max_kpts}:{xfeat_ransac_thresh}:{dust3r_conf}"
             if cache_key not in _VISMATCH_CACHE:
                 with _VISMATCH_LOCK:
                     if cache_key not in _VISMATCH_CACHE:
                         _log(f"[vismatch] Chargement du modèle {model_name}…")
                         from vismatch import get_matcher as _vm_get_matcher
-                        _VISMATCH_CACHE[cache_key] = _vm_get_matcher(
+                        if model_name == "duster":
+                            from .dust3r import HomolDust3rMatcher
+                            _VISMATCH_CACHE[cache_key] = HomolDust3rMatcher(device, conf_thr=dust3r_conf)
+                        else:
+                          _VISMATCH_CACHE[cache_key] = _vm_get_matcher(
                             model_name,
                             device=device,
                             max_num_keypoints=xfeat_max_kpts,
                             ransac_reproj_thresh=xfeat_ransac_thresh,
                         )
             vm = _VISMATCH_CACHE[cache_key]
+            vm.skip_ransac = True
 
             try:
                 def _bgr_to_tensor(bgr):
@@ -192,11 +198,23 @@ def get_matcher(*, name: str = "flann", nb_points: int = 750,
                     result = vm(_bgr_to_tensor(img1_bgr), _bgr_to_tensor(img2_bgr))
                 dt_match = time.time() - t_match
 
-                kp0 = result["inlier_kpts0"]
-                kp1 = result["inlier_kpts1"]
+                kp0 = result["matched_kpts0"]      # brut : le RANSAC par homographie de vismatch est désactivé (skip_ransac), filtrage ci-dessous
+                kp1 = result["matched_kpts1"]
                 mkpts0 = kp0.cpu().numpy() if hasattr(kp0, "cpu") else np.asarray(kp0)
                 mkpts1 = kp1.cpu().numpy() if hasattr(kp1, "cpu") else np.asarray(kp1)
                 n_in = len(mkpts0)
+
+                if n_in >= 8 and use_ransac:             # RANSAC 3D (matrice fondamentale), pas d'homographie
+                    thr = xfeat_ransac_thresh if model_name != "duster" else ransac_thresh
+                    F, fm = cv2.findFundamentalMat(np.float32(mkpts0), np.float32(mkpts1),
+                                                   cv2.USAC_MAGSAC, thr, 0.999, 100000)
+                    if F is None or fm is None:
+                        _log(f"{tag}: {n_in} brut → RANSAC échec")
+                        return []
+                    keep = fm.ravel().astype(bool)
+                    _log(f"{tag}: {n_in} brut → {int(keep.sum())} inliers (fondamentale, seuil {thr})")
+                    mkpts0, mkpts1 = mkpts0[keep], mkpts1[keep]
+                    n_in = len(mkpts0)
 
                 if min_disp > 0 and n_in:
                     keep = _fixed_mask(mkpts0, mkpts1, _scale_of(path_a), _scale_of(path_b), min_disp)
@@ -210,7 +228,7 @@ def get_matcher(*, name: str = "flann", nb_points: int = 750,
 
                 dt_total = time.time() - t0
                 _log(
-                    f"{tag}: {result['num_inliers']} inliers "
+                    f"{tag}: {n_in} inliers "
                     f"[lecture {t_read:.1f}s · match {dt_match:.1f}s · total {dt_total:.1f}s]"
                 )
 

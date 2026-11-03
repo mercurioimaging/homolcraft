@@ -46,6 +46,7 @@ class HomolDust3rMatcher(Dust3rMatcher):
         recip, nn2_in_1, _ = find_reciprocal_matches(*pts3d_list)
         mk1 = pts2d_list[1][recip]
         mk0 = pts2d_list[0][nn2_in_1][recip]
-        mk0 = self.rescale_coords(mk0, *shape0, *img0.shape[-2:])
-        mk1 = self.rescale_coords(mk1, *shape1, *img1.shape[-2:])
+        # xy_grid donne des indices de pixel (centre = entier) : convention demi-pixel au changement d'échelle
+        mk0 = self.rescale_coords(mk0 + 0.5, *shape0, *img0.shape[-2:]) - 0.5
+        mk1 = self.rescale_coords(mk1 + 0.5, *shape1, *img1.shape[-2:]) - 0.5
         return mk0, mk1, None, None, None, None

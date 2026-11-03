@@ -101,6 +101,36 @@ def _dedup_matches(good):
     return [m for i, m in enumerate(good) if i in keep]
 
 
+def _refine_lk(path_a, path_b, size_a, size_b, pa, pb, refine_size: int, tag: str):
+    """Raffine des matchs (coordonnées dans les images de travail size_a/size_b) par flot optique LK
+    à `refine_size` px (grand côté), contrôle aller-retour ; renvoie les matchs gardés, mêmes repères."""
+    from .io import read_image as _ri
+    ga, wa, _ = _ri(str(path_a), size=refine_size, clahe=False)
+    gb, wb, _ = _ri(str(path_b), size=refine_size, clahe=False)
+    ga, gb = cv2.cvtColor(ga, cv2.COLOR_BGR2GRAY), cv2.cvtColor(gb, cv2.COLOR_BGR2GRAY)
+    H_, W_ = max(ga.shape[0], gb.shape[0]), max(ga.shape[1], gb.shape[1])       # LK exige des images de même taille (padding bas/droite : coordonnées inchangées)
+    ra_ = np.array([ga.shape[1] / size_a[1], ga.shape[0] / size_a[0]], np.float32)
+    rb_ = np.array([gb.shape[1] / size_b[1], gb.shape[0] / size_b[0]], np.float32)
+    ga = cv2.copyMakeBorder(ga, 0, H_ - ga.shape[0], 0, W_ - ga.shape[1], cv2.BORDER_CONSTANT, value=0)
+    gb = cv2.copyMakeBorder(gb, 0, H_ - gb.shape[0], 0, W_ - gb.shape[1], cv2.BORDER_CONSTANT, value=0)
+    ra, rb = ra_, rb_
+    # demi-pixel : centre de pixel = entier des deux côtés
+    qa = ((pa + 0.5) * ra - 0.5).astype(np.float32).reshape(-1, 1, 2)
+    qb = ((pb + 0.5) * rb - 0.5).astype(np.float32).reshape(-1, 1, 2)
+    crit = (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 40, 0.01)
+    kw = dict(winSize=(41, 41), maxLevel=4, flags=cv2.OPTFLOW_USE_INITIAL_FLOW, criteria=crit)
+    q1, st1, _ = cv2.calcOpticalFlowPyrLK(ga, gb, qa, qb.copy(), **kw)
+    q0, st2, _ = cv2.calcOpticalFlowPyrLK(gb, ga, q1, qa.copy(), **kw)
+    fb = np.hypot(*(q0 - qa).reshape(-1, 2).T)
+    drift = np.hypot(*(q1 - qb).reshape(-1, 2).T)
+    _log(f"{tag}: LK statut {int(((st1.ravel() == 1) & (st2.ravel() == 1)).sum())}/{len(fb)} · aller-retour médian {np.median(fb):.1f}px · dérive médiane {np.median(drift):.1f}px (rés. raffinement)")
+    keep = (st1.ravel() == 1) & (st2.ravel() == 1) & (fb < 0.5) & (drift < 6 * float(rb.max()))
+    _log(f"{tag}: raffinement LK à {refine_size}px : {int(keep.sum())}/{len(keep)} gardés, "
+         f"décalage médian {np.median(drift[keep]) / float(rb.max()):.2f}px(512)" if keep.any() else f"{tag}: raffinement LK : 0 gardé")
+    q0, q1 = q0.reshape(-1, 2)[keep], q1.reshape(-1, 2)[keep]
+    return (qa.reshape(-1, 2)[keep] + 0.5) / ra - 0.5, (q1 + 0.5) / rb - 0.5
+
+
 # ---------------------------------------------------------------------------
 # Factory pour le pipeline ---------------------------------------------------
 # ---------------------------------------------------------------------------
@@ -111,7 +141,8 @@ def get_matcher(*, name: str = "flann", nb_points: int = 750,
                 device: str | None = None,
                 xfeat_max_kpts: int = 8192,
                 xfeat_ransac_thresh: float = 5.0,
-                dust3r_conf: float = 1.5,
+                dust3r_conf: float = 1.5, use_masq: bool = False, vm_clahe: bool = False,
+                dust3r_refine: int = 2000,
                 min_disp: float = 0.0, dedup: bool = False,
                 lowe_ratio: float = 0.75, ransac_model: str = "homography",
                 stats: dict | None = None):
@@ -158,8 +189,14 @@ def get_matcher(*, name: str = "flann", nb_points: int = 750,
             t0 = time.time()
 
             try:
-                img1_bgr, _, _ = _read_image(str(path_a), size=resize_max_a, clahe=False)
-                img2_bgr, _, _ = _read_image(str(path_b), size=resize_max_b, clahe=False)
+                img1_bgr, _, _ = _read_image(str(path_a), size=resize_max_a, clahe=vm_clahe)
+                img2_bgr, _, _ = _read_image(str(path_b), size=resize_max_b, clahe=vm_clahe)
+                if use_masq:                      # fond (hors <image>_Masq.tif) grisé : le modèle ne voit que le livre et son support
+                    from .detectors import load_masq
+                    for img, pth in ((img1_bgr, path_a), (img2_bgr, path_b)):
+                        m = load_masq(pth, img.shape[:2])
+                        if m is not None:
+                            img[m == 0] = 127
             except Exception as e:
                 _log(f"{tag}: lecture image échouée: {e}")
                 return []
@@ -214,6 +251,11 @@ def get_matcher(*, name: str = "flann", nb_points: int = 750,
                     keep = fm.ravel().astype(bool)
                     _log(f"{tag}: {n_in} brut → {int(keep.sum())} inliers (fondamentale, seuil {thr})")
                     mkpts0, mkpts1 = mkpts0[keep], mkpts1[keep]
+                    n_in = len(mkpts0)
+
+                if model_name == "duster" and dust3r_refine and n_in >= 8:   # DUSt3R travaille à 512 px : points sur une grille ~12 px (pleine rés.)
+                    mkpts0, mkpts1 = _refine_lk(path_a, path_b, (h1, w1), (h2, w2),
+                                                np.float32(mkpts0), np.float32(mkpts1), dust3r_refine, tag)
                     n_in = len(mkpts0)
 
                 if min_disp > 0 and n_in:

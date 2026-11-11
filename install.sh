@@ -5,19 +5,37 @@
 
 set -e
 
-# Vérification de la version de Python
-PYTHON_VERSION=$(python3 -c 'import sys; print("{}.{}".format(sys.version_info[0], sys.version_info[1]))')
-REQUIRED_VERSION="3.8"
+PYTHON_BIN=""
+for candidate in python3.14 python3.13 python3.12 python3.11 python3.10 python3; do
+  if command -v "$candidate" >/dev/null 2>&1; then
+    ver=$("$candidate" -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null || echo "")
+    major=${ver%.*}
+    minor=${ver#*.}
+    if [ "$major" = "3" ] && [ -n "$minor" ] && [ "$minor" -ge 10 ]; then
+      PYTHON_BIN="$candidate"
+      break
+    fi
+  fi
+done
 
-if [[ $(echo -e "$PYTHON_VERSION\n$REQUIRED_VERSION" | sort -V | head -n1) != "$REQUIRED_VERSION" ]]; then
-  echo "Python >= 3.8 requis. Version détectée : $PYTHON_VERSION"
+if [ -z "$PYTHON_BIN" ]; then
+  echo "Aucun Python >= 3.10 trouvé. Installe-en un (ex: brew install python@3.11)."
   exit 1
 fi
 
-# Création de l'environnement virtuel
+if [ -d ".venv" ]; then
+  current=$(.venv/bin/python -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null || echo "")
+  cur_major=${current%.*}
+  cur_minor=${current#*.}
+  if [ "$cur_major" != "3" ] || [ -z "$cur_minor" ] || [ "$cur_minor" -lt 10 ]; then
+    echo "Venv existant en Python $current : suppression et recréation..."
+    rm -rf .venv
+  fi
+fi
+
 if [ ! -d ".venv" ]; then
-  echo "Création de l'environnement virtuel (.venv)..."
-  python3 -m venv .venv
+  echo "Création de l'environnement virtuel (.venv) avec $PYTHON_BIN ($("$PYTHON_BIN" --version))..."
+  "$PYTHON_BIN" -m venv .venv
 fi
 
 # Activation de l'environnement virtuel
